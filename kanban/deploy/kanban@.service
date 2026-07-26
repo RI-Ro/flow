@@ -1,0 +1,86 @@
+# =====================================================================
+# Шаблонный юнит systemd. Знак @ в имени означает шаблон: один файл
+# обслуживает любое число экземпляров.
+#
+#   systemctl start kanban@alpha
+#   systemctl start kanban@beta
+#
+# Подстановка %i — это то, что стоит после @. Каждый экземпляр читает
+# свой файл окружения /etc/kanban/<имя>.env, поэтому порт, база,
+# JWT_SECRET и каталоги у них полностью независимы.
+#
+# Установка:
+#   sudo cp kanban@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kanban@alpha
+# =====================================================================
+
+[Unit]
+Description=Флоу — планирование задач (экземпляр %i)
+Documentation=file:/opt/kanban/ЗАПУСК.md
+# network-online, а не network: иначе сервис может подняться раньше,
+# чем интерфейс получит адрес, и привязка к конкретному IP не удастся.
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Если база на этой же машине — без неё запускаться бессмысленно.
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=kanban
+Group=kanban
+
+# Рабочий каталог свой у каждого экземпляра: относительные пути из
+# переменных (например, UPLOAD_DIR=./uploads) разрешаются от него.
+WorkingDirectory=/opt/kanban/%i
+ExecStart=/opt/kanban/bin/api
+
+# Все настройки — из файла окружения экземпляра. Значения не задаются
+# здесь через Environment=, потому что содержимое юнита читает любой
+# пользователь системы (systemctl cat), а в файл с правами 600 —
+# только root.
+EnvironmentFile=/etc/kanban/%i.env
+
+# Перезапуск при падении. RestartSec нужен, чтобы при устойчивой
+# ошибке (например, недоступная база) не крутить цикл запусков.
+Restart=always
+RestartSec=5s
+# Если за 5 минут было 5 неудачных попыток — остановиться и не
+# маскировать проблему бесконечными перезапусками.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Корректное завершение: приложение закрывает соединения по SIGTERM.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# --- Ограничения прав ---
+# Сервису нужен доступ только к своему каталогу загрузок.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# ProtectSystem=strict делает всю файловую систему только для чтения,
+# поэтому каталог для вложений нужно открыть на запись явно.
+ReadWritePaths=/opt/kanban/%i/uploads
+
+# Дескрипторов нужно много: каждое WebSocket-соединение — это один
+# открытый сокет, и они долгоживущие. Стандартных 1024 хватит примерно
+# на 900 пользователей вместе с соединениями к базе.
+LimitNOFILE=65535
+
+# Логи уходят в journald; приложение пишет JSON в stdout.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kanban-%i
+
+[Install]
+WantedBy=multi-user.target

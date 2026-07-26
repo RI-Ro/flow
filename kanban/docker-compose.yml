@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kanban
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Применяются по алфавиту при первом запуске тома: роли, схема,
+      # RLS, seed. Порядок имён файлов в migrations/ это гарантирует.
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kanban"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://app_user:${APP_DB_PASSWORD:-change_me_user}@db:5432/kanban?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      APP_ADDR: ":8080"
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      UPLOAD_DIR: /var/uploads
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-40}
+      DB_MIN_IDLE: ${DB_MIN_IDLE:-8}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}
+      ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
+    volumes:
+      - uploads:/var/uploads
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
