@@ -115,6 +115,10 @@ type Task struct {
 	CompletedAt *time.Time  `json:"completedAt"`
 	CreatedBy   uuid.UUID   `json:"createdBy"`
 	Assignees   []uuid.UUID `json:"assignees"`
+	// Кто из исполнителей уже отметил свою часть выполненной.
+	// Отдельным списком, а не признаком внутри Assignees, чтобы не
+	// ломать существующий формат: клиент просто проверяет вхождение.
+	AssigneesDone []uuid.UUID `json:"assigneesDone"`
 	Grants      []Grant     `json:"grants"`
 	Steps       []Step      `json:"steps"`
 	CommentCnt  int         `json:"commentCount"`

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"log/slog"
 	"errors"
 	"fmt"
 	"time"
@@ -56,6 +57,40 @@ func New(ctx context.Context, url string, poolSize, minIdle int) (*DB, error) {
 	if err := pool.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("база не отвечает: %w", err)
 	}
+
+	// Проверка роли подключения — не формальность, а защита от самой
+	// опасной ошибки развёртывания.
+	//
+	// Всё разграничение доступа в этом приложении держится на политиках
+	// RLS. Суперпользователь и роль с BYPASSRLS их полностью
+	// игнорируют: подключившись такой ролью, приложение продолжит
+	// работать как ни в чём не бывало, но каждый пользователь увидит
+	// задачи всех проектов сразу — включая те, к которым его никто не
+	// приглашал. Снаружи это выглядит как ошибка в коде, хотя причина
+	// в строке подключения: в DATABASE_URL указан postgres вместо
+	// app_user. Тихо продолжать в таком режиме нельзя.
+	var (
+		roleName   string
+		isSuper    bool
+		bypassRLS  bool
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT current_user, rolsuper, rolbypassrls
+		  FROM pg_roles WHERE rolname = current_user`).
+		Scan(&roleName, &isSuper, &bypassRLS); err != nil {
+		return nil, fmt.Errorf("не удалось проверить роль подключения: %w", err)
+	}
+	if isSuper || bypassRLS {
+		pool.Close()
+		return nil, fmt.Errorf(
+			"подключение выполнено ролью %q, которая обходит политики доступа "+
+				"(superuser=%v, bypassrls=%v). В этом режиме разграничение прав не работает: "+
+				"каждый пользователь увидит чужие проекты и задачи. "+
+				"Укажите в DATABASE_URL роль app_user — она создаётся миграцией 0000_roles.sql "+
+				"и намеренно лишена этих привилегий",
+			roleName, isSuper, bypassRLS)
+	}
+	slog.Info("подключение к базе", "role", roleName)
 	return &DB{Pool: pool}, nil
 }
 

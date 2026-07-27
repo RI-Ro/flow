@@ -1,13 +1,37 @@
 import React, { useState } from "react";
 import { Check, Video, Search } from "lucide-react";
-import { Avatar, Modal, ModalHeader, inputStyle } from "../lib/ui.jsx";
+import { videoCallLink } from "../lib/theme.js";
+import { Avatar, Modal, ModalHeader, ConfirmDialog, inputStyle } from "../lib/ui.jsx";
 
-export default function Team({ theme, directory, team, onClose, onSave, onOpenUser }) {
+export default function Team({ theme, directory, team, currentUser, onClose, onSave, onOpenUser }) {
   const [selected, setSelected] = useState(new Set(team));
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  // Подтверждение вызова: в длинном списке промахнуться по соседней
+  // строке особенно легко.
+  const [confirmCall, setConfirmCall] = useState(null);
 
-  const list = directory.filter((u) => `${u.fullName} ${u.position} ${u.phone}`.toLowerCase().includes(query.toLowerCase()));
+  // Себя в собственную команду добавлять незачем — исполнителем своей
+  // задачи человек может быть и так.
+  const pool = directory.filter((u) => u.id !== currentUser?.id);
+
+  const q = query.trim().toLowerCase();
+  const matched = q
+    ? pool.filter((u) => `${u.fullName} ${u.position} ${u.phone}`.toLowerCase().includes(q))
+    : pool;
+
+  // При большом справочнике рисовать несколько сотен строк разом
+  // бессмысленно: список невозможно просмотреть глазами, а браузер
+  // заметно тормозит. До ввода запроса показываем уже выбранных
+  // и небольшую выборку остальных — этого хватает, чтобы понять, что
+  // список не пуст, а дальше человек ищет.
+  const LIMIT = 60;
+  const preselected = matched.filter((u) => selected.has(u.id));
+  const rest = matched.filter((u) => !selected.has(u.id));
+  const list = q
+    ? matched.slice(0, LIMIT)
+    : [...preselected, ...rest.slice(0, Math.max(0, LIMIT - preselected.length))];
+  const hidden = matched.length - list.length;
 
   const toggle = (id) => setSelected((prev) => {
     const next = new Set(prev);
@@ -36,9 +60,12 @@ export default function Team({ theme, directory, team, onClose, onSave, onOpenUs
               <div style={{ color: theme.textMuted }} className="text-[11.5px] truncate">{u.deleted ? "Учётная запись удалена" : u.position || "Должность не указана"}</div>
             </button>
             {u.phone && !u.deleted && (
-              <a href={`callto:${u.phone.replace(/[^\d+]/g, "")}`} style={{ color: theme.accent, border: `1px solid ${theme.border}` }} className="flex items-center gap-1 text-[11.5px] px-2 py-1 rounded-lg shrink-0" title={`Видеозвонок: ${u.phone}`}>
+              <button onClick={() => setConfirmCall(u)}
+                style={{ color: theme.accent, border: `1px solid ${theme.border}` }}
+                className="flex items-center gap-1 text-[11.5px] px-2 py-1 rounded-lg shrink-0"
+                title={`Видеозвонок: ${u.phone}`}>
                 <Video size={12} /> Видео
-              </a>
+              </button>
             )}
             {!u.deleted && (
               <button onClick={() => toggle(u.id)} style={{ background: selected.has(u.id) ? theme.accent : "transparent", border: `1.5px solid ${selected.has(u.id) ? theme.accent : theme.border}` }} className="w-[18px] h-[18px] rounded-md flex items-center justify-center shrink-0" title={selected.has(u.id) ? "Убрать из команды" : "Добавить в команду"}>
@@ -48,6 +75,13 @@ export default function Team({ theme, directory, team, onClose, onSave, onOpenUs
           </div>
         ))}
         {list.length === 0 && <p style={{ color: theme.textMuted }} className="text-[13px] text-center py-6">Никого не найдено.</p>}
+
+        {hidden > 0 && (
+          <p style={{ color: theme.textMuted }} className="text-[12px] text-center py-3 leading-relaxed">
+            Показаны первые {list.length} из {matched.length}.<br />
+            Уточните запрос, чтобы найти нужного сотрудника.
+          </p>
+        )}
       </div>
 
       <div style={{ borderColor: theme.border }} className="border-t p-4 flex items-center gap-2">
@@ -55,6 +89,20 @@ export default function Team({ theme, directory, team, onClose, onSave, onOpenUs
         <button onClick={onClose} style={{ background: theme.surfaceAlt, color: theme.text, border: `1px solid ${theme.border}` }} className="rounded-lg px-4 py-2.5 text-[13px] font-medium">Отмена</button>
         <button onClick={save} disabled={saving} style={{ background: theme.accent, color: theme.accentText }} className="rounded-lg px-4 py-2.5 text-[13px] font-semibold disabled:opacity-50">{saving ? "Сохраняем…" : "Сохранить"}</button>
       </div>
+
+      {confirmCall && (
+        <ConfirmDialog theme={theme}
+          title="Начать видеозвонок?"
+          message={`Вызов будет отправлен: ${confirmCall.fullName} (${confirmCall.phone}).`}
+          confirmLabel="Позвонить"
+          danger={false}
+          onCancel={() => setConfirmCall(null)}
+          onConfirm={() => {
+            const href = videoCallLink(confirmCall);
+            setConfirmCall(null);
+            if (href) window.location.href = href;
+          }} />
+      )}
     </Modal>
   );
 }

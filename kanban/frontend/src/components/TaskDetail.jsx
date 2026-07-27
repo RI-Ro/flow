@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Pencil, Trash2, Calendar, Users as UsersIcon, Eye, Lock, Share2, Send, Upload,
-  Paperclip, Download, ExternalLink, Check, X, Plus, CircleDot, CheckCircle2, RotateCcw, Video,
+  Paperclip, Download, ExternalLink, Check, X, Plus, CircleDot, CheckCircle2, RotateCcw, Video, Mail,
 } from "lucide-react";
 import { api } from "../lib/api.js";
 import { onRealtimeMessage } from "../lib/realtime.js";
-import { PRIORITIES, GRANT_LABEL, fmtDate, fmtDateTime, fmtRelative, fmtSize, resolveUser, conferenceLink, conferenceNames } from "../lib/theme.js";
-import { Avatar, Modal, ModalHeader, Checkbox, inputStyle } from "../lib/ui.jsx";
+import { PRIORITIES, GRANT_LABEL, fmtDate, fmtDateTime, fmtRelative, fmtSize, resolveUser, conferenceLink, conferenceNames, taskMailLink } from "../lib/theme.js";
+import { Avatar, Modal, ModalHeader, Checkbox, ConfirmDialog, inputStyle } from "../lib/ui.jsx";
 
 // Заменяет элемент списка по id или добавляет новый в конец — общая
 // операция и для собственных оптимистичных правок, и для событий,
@@ -49,6 +49,27 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
   const confLink =
     confParticipants.length >= 2 ? conferenceLink(confParticipants, currentUser.id) : null;
   const confNames = conferenceNames(confParticipants, currentUser.id);
+
+  // Отметка исполнителя: доступна, только если текущий пользователь сам
+  // в списке исполнителей. Автор задачи, не будучи исполнителем, кнопки
+  // не увидит — за него отметиться нельзя.
+  const iAmAssignee = task.assignees.includes(currentUser.id);
+  const doneIds = task.assigneesDone || [];
+  const iMarkedDone = doneIds.includes(currentUser.id);
+
+  const markAssignment = async (next) => {
+    try {
+      const updated = await api.completeAssignment(task.id, next);
+      onTaskPatched(updated);
+      reloadActivity();
+    } catch (e) {
+      onError(e.message);
+    }
+  };
+  const mailLink = taskMailLink(confParticipants, task.title, currentUser.id);
+  // Вызов уходит только после подтверждения: случайное нажатие
+  // мгновенно поднимает трубку у нескольких человек сразу.
+  const [pendingCall, setPendingCall] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -141,6 +162,10 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
               <span style={{ color: u.deleted ? theme.textMuted : theme.text, textDecoration: u.deleted ? "line-through" : "none" }} className="text-[12px]">
                 {u.fullName}
               </span>
+              {doneIds.includes(u.id) && (
+                <Check size={12} style={{ color: theme.success }}
+                  title="Исполнитель отметил свою часть выполненной" />
+              )}
             </button>
           ))}
         </div>
@@ -152,8 +177,23 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
             хотя бы два участника с телефонами: звать на «конференцию»
             одного человека смысла нет, для этого есть видеозвонок
             в его карточке. */}
+        {mailLink && (
+          <a href={mailLink}
+            style={{ background: theme.surfaceAlt, color: theme.text, border: `1px solid ${theme.border}` }}
+            className="w-full mt-3 rounded-lg py-2.5 text-[12.5px] font-semibold flex items-center justify-center gap-2"
+            title={`Написать: ${confNames}`}>
+            <Mail size={15} style={{ color: theme.accent }} />
+            <span className="flex flex-col items-start leading-tight">
+              <span>Написать участникам</span>
+              <span style={{ color: theme.textMuted }} className="text-[10.5px] font-normal">
+                {confNames}
+              </span>
+            </span>
+          </a>
+        )}
+
         {confLink && (
-          <a href={confLink}
+          <button onClick={() => setPendingCall({ href: confLink, names: confNames })}
             style={{ background: theme.surfaceAlt, color: theme.text, border: `1px solid ${theme.border}` }}
             className="w-full mt-3 rounded-lg py-2.5 text-[13px] font-semibold flex items-center justify-center gap-2"
             title={`Собрать участников: ${confNames}`}>
@@ -164,7 +204,20 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
                 {confNames}
               </span>
             </span>
-          </a>
+          </button>
+        )}
+
+        {iAmAssignee && (
+          <button onClick={() => markAssignment(!iMarkedDone)}
+            style={{
+              background: iMarkedDone ? theme.surfaceAlt : theme.accent,
+              color: iMarkedDone ? theme.text : theme.accentText,
+              border: `1px solid ${theme.border}`,
+            }}
+            className="w-full mt-3 rounded-lg py-2 text-[12.5px] font-semibold flex items-center justify-center gap-2">
+            {iMarkedDone ? <RotateCcw size={14} /> : <Check size={14} />}
+            {iMarkedDone ? "Снять мою отметку о выполнении" : "Я выполнил свою часть"}
+          </button>
         )}
 
         {canEdit && (
@@ -224,6 +277,19 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
           </div>
         )}
       </div>
+
+      {pendingCall && (
+        <ConfirmDialog theme={theme}
+          title="Начать видеоконференцию?"
+          message={`Вызов будет отправлен участникам: ${pendingCall.names}. Убедитесь, что это не случайное нажатие.`}
+          confirmLabel="Позвонить" danger={false}
+          onCancel={() => setPendingCall(null)}
+          onConfirm={() => {
+            const href = pendingCall.href;
+            setPendingCall(null);
+            window.location.href = href;
+          }} />
+      )}
     </Modal>
   );
 }

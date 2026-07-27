@@ -46,7 +46,7 @@ func New(cfg *config.Config, db *database.DB, am *auth.Manager, files *storage.L
 // порядок выше 300 одновременных пользователей на одной машине.
 func (s *Server) App() *fiber.App {
 	app := fiber.New(fiber.Config{
-		AppName:               "Флоу",
+		AppName:               "Команда",
 		DisableStartupMessage: false,
 
 		// За обратным прокси адрес клиента приходит в X-Forwarded-For,
@@ -163,6 +163,9 @@ func (s *Server) App() *fiber.App {
 	tasks.Delete("/", s.DeleteTask)
 	tasks.Post("/move", s.MoveTask)
 	tasks.Post("/complete", s.CompleteTask)
+	// Отметка исполнителя о своей части — отдельно от закрытия задачи
+	// целиком: это разные действия с разными правами.
+	tasks.Post("/assignment", s.CompleteAssignment)
 	tasks.Post("/steps", s.CreateStep)
 	tasks.Patch("/steps/:stepID", s.RenameStep)
 	tasks.Post("/steps/:stepID/toggle", s.ToggleStep)

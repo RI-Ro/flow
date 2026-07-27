@@ -32,6 +32,15 @@ type Config struct {
 	// Адреса обратных прокси, чьему заголовку X-Forwarded-For можно
 	// верить. Пустой список означает прямую работу без прокси.
 	TrustedProxies []string
+
+	// --- Возможности, управляемые конфигурацией ---
+	// Видеовызовы: скрывают кнопки «Видеозвонок» и «Видеоконференция»
+	// целиком, если в организации нет клиента телефонии.
+	VideoCalls bool
+	// Массовая почтовая рассылка участникам задачи.
+	GroupEmail bool
+	// Название в интерфейсе и заголовке вкладки.
+	AppName string
 	Env             string
 
 	// Размер пула соединений с БД. При множестве коротких транзакций
@@ -46,7 +55,14 @@ type Config struct {
 	StatementCache bool
 }
 
-func Load() (*Config, error) {
+// Load собирает конфигурацию из трёх источников в порядке
+// возрастания приоритета: значения по умолчанию, config.yaml,
+// переменные окружения. Окружение выше файла сознательно — в systemd
+// и контейнерах секреты передаются именно так, и переопределить один
+// параметр, не трогая общий файл, нужно чаще, чем наоборот.
+//
+// Пустой configPath означает «искать ./config.yaml, но не требовать».
+func Load(explicitPath string) (*Config, error) {
 	c := &Config{
 		Addr:            env("APP_ADDR", ":8080"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
@@ -60,11 +76,34 @@ func Load() (*Config, error) {
 		AllowSelfRegistration: envBool("ALLOW_SELF_REGISTRATION", false),
 		StaticDir:             env("STATIC_DIR", ""),
 		TrustedProxies:        splitList(env("TRUSTED_PROXIES", "")),
+		VideoCalls:            envBool("FEATURE_VIDEO_CALLS", true),
+		GroupEmail:            envBool("FEATURE_GROUP_EMAIL", true),
+		AppName:               env("APP_NAME", "Команда"),
 		Env:             env("APP_ENV", "development"),
 		DBPoolSize:      envInt("DB_POOL_SIZE", 40),
 		DBMinIdle:       envInt("DB_MIN_IDLE", 8),
 		StatementCache:  env("DB_STATEMENT_CACHE", "true") == "true",
 	}
+
+	// Конфигурационный файл применяется ДО проверок ниже: заданные в
+	// нём значения должны считаться такими же полноценными, как
+	// переменные окружения, и не приводить к отказу «параметр не задан».
+	// Путь берётся из параметра. Функции configPath() и
+	// explicitConfigPath() ниже вызывать нельзя: одноимённый параметр
+	// Load их затеняет, и обращение к ним компилятор считает попыткой
+	// вызвать строку. Они остаются для тех, кто вызывает Load("").
+	// Явно переданный путь важнее: он приходит из флага --config,
+	// разобранного в main. Если параметр пуст, путь ищет configPath()
+	// сама — по флагу, переменной CONFIG_FILE и ./config.yaml.
+	path, explicit := explicitPath, true
+	if path == "" {
+		path, explicit = configPath(), explicitConfigPath()
+	}
+	fc, ferr := loadFile(path, explicit)
+	if ferr != nil {
+		return nil, ferr
+	}
+	c.applyFile(fc)
 
 	// --- значения по умолчанию, когда окружение не задано ---
 	//
@@ -159,4 +198,40 @@ func envDuration(k string, def time.Duration) time.Duration {
 		return v
 	}
 	return def
+}
+
+// configPath возвращает путь к config.yaml.
+//
+// Порядок поиска: флаг --config, затем переменная CONFIG_FILE, затем
+// ./config.yaml рядом с исполняемым файлом. Последний вариант — просто
+// удобство: если файла нет, приложение работает на значениях по
+// умолчанию, а не падает.
+func configPath() string {
+	for i, arg := range os.Args {
+		if arg == "--config" || arg == "-config" {
+			if i+1 < len(os.Args) {
+				return os.Args[i+1]
+			}
+		}
+		if v, ok := strings.CutPrefix(arg, "--config="); ok {
+			return v
+		}
+	}
+	if v := os.Getenv("CONFIG_FILE"); v != "" {
+		return v
+	}
+	return "config.yaml"
+}
+
+// explicitConfigPath сообщает, был ли путь указан явно. Если да,
+// отсутствие файла — ошибка запуска: человек рассчитывал на этот
+// файл, и молча проигнорировать его нельзя. Если нет — просто
+// работаем на значениях по умолчанию.
+func explicitConfigPath() bool {
+	for _, arg := range os.Args {
+		if arg == "--config" || arg == "-config" || strings.HasPrefix(arg, "--config=") {
+			return true
+		}
+	}
+	return os.Getenv("CONFIG_FILE") != ""
 }

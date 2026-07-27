@@ -177,6 +177,10 @@ export const api = {
   deleteTask: (id) => del(`/tasks/${id}/`),
   moveTask: (id, columnId, position) => post(`/tasks/${id}/move`, { columnId, position }),
   completeTask: (id, completed) => post(`/tasks/${id}/complete`, { completed }),
+  // Отметка исполнителя о своей части. Отдельный маршрут, а не флаг в
+  // completeTask: права разные — закрыть задачу может редактор,
+  // отметиться только сам исполнитель.
+  completeAssignment: (id, completed) => post(`/tasks/${id}/assignment`, { completed }),
   setGrants: (id, grants) => put(`/tasks/${id}/grants`, grants),
 
   createStep: (taskId, body) => post(`/tasks/${taskId}/steps`, { body }),

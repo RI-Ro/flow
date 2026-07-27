@@ -193,18 +193,42 @@ export const BG_IMAGES = [
 // В базе, как и у градиентов, хранится идентификатор, а не путь: если
 // каталог со статикой переедет, менять записи в таблице не придётся.
 export const BG_PHOTOS = [
-  { id: "img:belgorod", label: "Белгород" },
-  { id: "img:berezovskoe",   label: "Березовское" },
-  { id: "img:dagestan",    label: "Дагестан" },
-  { id: "img:djangitau",   label: "Джангитау" },
-  { id: "img:elbrus",   label: "Эльбрус" },
-  { id: "img:elbrus2",   label: "Эльбрус" },
-  { id: "img:kazbek",  label: "Казбек" },
-  { id: "img:kislovodsk",   label: "Кисловодск" },
-  { id: "img:mijirgi",  label: "Мижирги" },
-  { id: "img:sankt",   label: "Санкт-Петербург" },
-  { id: "img:step",  label: "Степь" },
-  { id: "img:volgograd",  label: "Волгоград" },
+  { id: "img:dunes",  label: "Дюны" },
+  { id: "img:deep",   label: "Глубина" },
+  { id: "img:grove",  label: "Роща" },
+  { id: "img:haze",   label: "Дымка" },
+  { id: "img:steel",  label: "Сталь" },
+  { id: "img:coral",  label: "Коралл" },
+  { id: "img:aurora", label: "Сияние" },
+  { id: "img:sand",   label: "Песок" },
+  { id: "img:ink",    label: "Чернила" },
+  { id: "img:mint",   label: "Мята" },
+  { id: "img:plum",   label: "Слива" },
+  { id: "img:clay",   label: "Глина" },
+
+  // Пейзажи городов и природы России.
+  //
+  // Это СТИЛИЗАЦИИ, а не фотографии: изображения построены
+  // алгоритмически (силуэты рельефа и застройки под градиентным небом),
+  // потому что подобрать настоящие снимки с подходящей лицензией в
+  // ходе сборки было нечем. Пропорции и палитра подобраны под каждое
+  // место, но узнаваемых видов там нет.
+  //
+  // Чтобы поставить настоящие фотографии, замените одноимённые файлы в
+  // frontend/public/backgrounds/ (полный кадр 1920×1200 и уменьшённая
+  // копия <имя>-thumb.jpg 320×200). Код менять не нужно.
+  { id: "img:gorod-belgorod",   label: "Белгород" },
+  { id: "img:gorod-spb",        label: "Санкт-Петербург" },
+  { id: "img:gorod-moskva",     label: "Москва" },
+  { id: "img:gorod-kislovodsk", label: "Кисловодск" },
+  { id: "img:gorod-sochi",      label: "Сочи" },
+  { id: "img:gorod-simferopol", label: "Симферополь" },
+  { id: "img:gorod-volgograd",  label: "Волгоград" },
+  { id: "img:priroda-uschelye", label: "Берёзовское ущелье" },
+  { id: "img:priroda-dagestan", label: "Дагестан" },
+  { id: "img:priroda-elbrus",   label: "Эльбрус" },
+  { id: "img:priroda-baikal",   label: "Байкал" },
+  { id: "img:priroda-altay",    label: "Алтай" },
 ];
 
 // Полный список для выбора фона: сначала однотонные градиенты, затем
@@ -276,13 +300,39 @@ export function conferenceNames(users, currentUserId) {
 
 export function conferenceLink(users, excludeUserId) {
   const numbers = users
-    // Свой номер в набор не включаем: звонить самому себе не нужно,
-    // а некоторые клиенты связи на такой номер в списке спотыкаются.
     .filter((u) => u && !u.deleted && u.phone && u.id !== excludeUserId)
     .map((u) => u.phone.replace(/[^\d+]/g, ""))
     .filter(Boolean);
   const unique = [...new Set(numbers)];
-  return unique.length > 0 ? `callto://${unique.join("&")}` : null;
+  // Формат клиента телефонии: команда, признак видео и список номеров
+  // через запятую в одном параметре.
+  return unique.length > 0
+    ? `callto://make_conference_call#video=1#number=${unique.join(",")}`
+    : null;
+}
+
+// Одиночный видеовызов. Схема та же, но команда другая — клиент
+// различает вызов и конференцию именно по ней, а не по числу номеров.
+export function videoCallLink(user) {
+  if (!user || user.deleted || !user.phone) return null;
+  const number = user.phone.replace(/[^\d+]/g, "");
+  return number ? `callto://make_call#video=1#number=${number}` : null;
+}
+
+// Письмо с заготовленной темой и текстом. mailto требует процентного
+// кодирования: без него перенос строки и кавычки в теме ломают ссылку.
+export function taskMailLink(users, taskTitle, excludeUserId) {
+  const addresses = users
+    .filter((u) => u && !u.deleted && u.email && u.id !== excludeUserId)
+    .map((u) => u.email);
+  const unique = [...new Set(addresses)];
+  if (unique.length === 0) return null;
+
+  const subject = `Вопрос по задаче "${taskTitle}"`;
+  const body =
+    `Уважаемые коллеги!\n\nПрошу уточнить состояние задачи "${taskTitle}".`;
+  return `mailto:${unique.join(",")}?subject=${encodeURIComponent(subject)}` +
+         `&body=${encodeURIComponent(body)}`;
 }
 
 export const ROLE_LABEL = { owner: "Владелец", editor: "Редактор", reader: "Читатель" };
@@ -331,3 +381,31 @@ export const resolveUser = (directory, id) =>
 
 export const initials = (name) =>
   (name || "?").split(" ").filter(Boolean).slice(0, 2).map((n) => n[0]).join("").toUpperCase();
+
+// Ссылка на письмо с заполненными темой и текстом.
+//
+// Разделители по RFC 6068: первый параметр отделяется «?», последующие
+// «&». Значения обязаны быть закодированы — иначе пробелы, кавычки и
+// перевод строки оборвут ссылку на первом же символе.
+export function mailtoLink(addresses, taskTitle) {
+  const list = (Array.isArray(addresses) ? addresses : [addresses])
+    .filter(Boolean);
+  if (list.length === 0) return null;
+
+  const subject = `Вопрос по задаче "${taskTitle}"`;
+  const body =
+    `Уважаемые коллеги!\n\n` +
+    `Прошу уточнить состояние задачи "${taskTitle}".`;
+
+  return `mailto:${list.join(",")}` +
+    `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(body)}`;
+}
+
+// Адреса всех участников задачи, кроме себя: письмо самому себе в
+// массовой рассылке не нужно.
+export function taskMailRecipients(users, currentUserId) {
+  return users
+    .filter((u) => u && !u.deleted && u.email && u.id !== currentUserId)
+    .map((u) => u.email);
+}

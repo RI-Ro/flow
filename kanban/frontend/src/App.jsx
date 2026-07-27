@@ -556,7 +556,7 @@ export default function App() {
     <div style={{ background: theme.bg, minHeight: "100vh" }} className="flex flex-col">
       <header style={{ borderColor: theme.border, background: theme.surface }} className="border-b px-4 py-2.5 flex items-center gap-2.5 flex-wrap relative z-40">
         <div style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="flex items-center gap-1.5 font-bold text-[15px]">
-          <LayoutGrid size={18} style={{ color: theme.accent }} /> Флоу
+          <LayoutGrid size={18} style={{ color: theme.accent }} /> Команда
         </div>
 
         <div className="relative">
@@ -773,7 +773,7 @@ export default function App() {
       {newBoardOpen && <NewBoardModal theme={theme} onClose={() => setNewBoardOpen(false)} onCreate={createBoard} />}
 
       {teamOpen && (
-        <Team theme={theme} directory={directory} team={team} onClose={() => setTeamOpen(false)} onOpenUser={setUserCard}
+        <Team theme={theme} directory={directory} team={team} currentUser={user} onClose={() => setTeamOpen(false)} onOpenUser={setUserCard}
           onSave={async (ids) => {
             try { await api.saveTeam(ids); setTeam(ids); setTeamOpen(false); }
             catch (e) { showError(e.message); }

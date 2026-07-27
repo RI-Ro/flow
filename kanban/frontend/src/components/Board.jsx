@@ -15,6 +15,7 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
   const stepsDone = task.steps.filter((s) => s.done).length;
   const author = showAuthor ? resolveUser(directory, task.createdBy) : null;
   const fill = taskColorFill(task.color, theme);
+  const doneIds = task.assigneesDone || [];
 
   const handleDragOver = (e) => {
     if (!draggable) return;
@@ -64,7 +65,7 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
         )}
       </div>
 
-      <h4 style={{ color: theme.text, textDecoration: completed ? "line-through" : "none" }} className="text-[13.5px] font-medium leading-snug mb-2">
+      <h4 style={{ color: theme.text, textDecoration: completed ? "line-through" : "none" }} className="text-[12.5px] font-medium leading-snug mb-2">
         {task.title}
       </h4>
 
@@ -99,8 +100,24 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
         <div className="flex items-center gap-1 min-w-0">
           <div className="flex -space-x-1.5">
             {assignees.slice(0, 3).map((u, i) => (
-              <span key={`${u.id}-${i}`} style={{ boxShadow: `0 0 0 2px ${theme.surface}`, borderRadius: 999 }}>
+              // Отметившимся исполнителям добавляем зелёный контур
+              // и галочку: на доске важно видеть, кто уже закончил,
+              // не открывая карточку.
+              <span key={`${u.id}-${i}`} className="relative"
+                style={{
+                  boxShadow: `0 0 0 2px ${doneIds.includes(u.id) ? theme.success : theme.surface}`,
+                  borderRadius: 999,
+                }}
+                title={doneIds.includes(u.id)
+                  ? `${u.fullName} — свою часть выполнил(а)`
+                  : u.fullName}>
                 <Avatar user={u} size={22} theme={theme} />
+                {doneIds.includes(u.id) && (
+                  <span style={{ background: theme.success }}
+                    className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full flex items-center justify-center">
+                    <Check size={7} color="#fff" strokeWidth={4} />
+                  </span>
+                )}
               </span>
             ))}
             {assignees.length > 3 && (
@@ -150,13 +167,13 @@ export function Column({ column, tasks, theme, directory, canEdit, dragging, dro
       onDragOver={handleDragOver}
       onDrop={(e) => { e.preventDefault(); onDrop(column.id); }}
       style={{ background: theme.surfaceAlt, border: `1px solid ${isTarget && dragging ? theme.accent : theme.border}` }}
-      className="rounded-2xl flex flex-col w-[280px] shrink-0 max-h-full transition-colors"
+      className="rounded-2xl flex flex-col w-[232px] shrink-0 max-h-full transition-colors"
     >
       <header className="px-3 pt-3 pb-2">
         <div className="flex items-center justify-between gap-2 mb-1.5">
           <div className="flex items-center gap-2 min-w-0">
             <span style={{ background: column.color }} className="w-2 h-2 rounded-full shrink-0" />
-            <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[13.5px] truncate">{column.title}</h3>
+            <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[12.5px] truncate">{column.title}</h3>
             {column.isDone && <Check size={12} style={{ color: theme.success }} title="Колонка завершения" />}
           </div>
           {canEdit && <button onClick={onSettings} style={{ color: theme.textMuted }} title="Настроить колонки"><Settings size={13} /></button>}
@@ -251,7 +268,7 @@ export function BoardView({ columns, tasks, theme, directory, canEdit, canManage
 
         {canManage && (
           <button onClick={onSettings} style={{ border: `1px dashed ${theme.border}`, color: theme.textMuted, background: theme.surfaceAlt }}
-            className="w-[280px] shrink-0 rounded-2xl py-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium">
+            className="w-[232px] shrink-0 rounded-2xl py-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium">
             <Plus size={14} /> Добавить колонку
           </button>
         )}
@@ -290,7 +307,7 @@ export function InboxView({ tasks, theme, directory, onOpenTask }) {
         {groups.map(([title, list]) => (
           <section key={title} style={{ background: theme.surfaceAlt, border: `1px solid ${theme.border}` }} className="rounded-2xl w-[300px] shrink-0 flex flex-col max-h-full">
             <header className="px-3 pt-3 pb-2 flex items-center justify-between">
-              <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[13.5px] truncate">{title}</h3>
+              <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[12.5px] truncate">{title}</h3>
               <span style={{ color: theme.textMuted }} className="text-[11.5px]">{plural(list.length, "задача", "задачи", "задач")}</span>
             </header>
             <div className="px-2 pb-2 overflow-y-auto">

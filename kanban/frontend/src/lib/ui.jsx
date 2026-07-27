@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
-import { X, UserX, Phone, Video, Mail, Check } from "lucide-react";
-import { initials, DELETED_USER } from "./theme.js";
+import { X, UserX, Video, Mail, Check } from "lucide-react";
+import { initials, DELETED_USER, videoCallLink } from "./theme.js";
 
 export const inputStyle = (t) => ({ background: t.surfaceAlt, color: t.text, border: `1px solid ${t.border}` });
 
@@ -129,6 +129,9 @@ export function Toggle({ theme, checked, onChange, label }) {
 }
 
 export function UserCard({ theme, user, onClose }) {
+  // Хук объявляется до раннего возврата: порядок вызовов хуков должен
+  // быть одинаковым при каждом рендере.
+  const [confirmCall, setConfirmCall] = React.useState(null);
   if (!user) return null;
   const phone = (user.phone || "").replace(/[^\d+]/g, "");
 
@@ -155,21 +158,40 @@ export function UserCard({ theme, user, onClose }) {
           {user.phone && (
             <div style={{ background: theme.surfaceAlt, color: theme.text }}
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px]">
-              <Phone size={14} style={{ color: theme.textMuted }} /><span>{user.phone}</span>
+              <Video size={14} style={{ color: theme.textMuted }} /><span>{user.phone}</span>
             </div>
           )}
         </div>
         {user.phone && !user.deleted && (
-          // Схема callto: обрабатывается корпоративным клиентом связи —
-          // он сам решает, поднимать голосовой вызов или видео. Иконка
-          // отражает основной сценарий: видеосвязь.
-          <a href={`callto:${phone}`} style={{ background: theme.accent, color: theme.accentText }}
+          // Ссылку собирает videoCallLink — там единый формат команды
+          // клиента телефонии. Собирать её здесь строкой нельзя: формат
+          // уже расходился между карточкой сотрудника и задачей.
+          //
+          // Вызов уходит только после подтверждения: нажатие мгновенно
+          // поднимает вызов у человека, и случайный клик по кнопке в
+          // открытой карточке — вполне реальный сценарий.
+          <button onClick={() => setConfirmCall(videoCallLink(user))}
+            style={{ background: theme.accent, color: theme.accentText }}
             className="w-full mt-3 rounded-lg py-2.5 text-[13.5px] font-semibold flex items-center justify-center gap-2">
             <Video size={15} /> Видеозвонок
-          </a>
+          </button>
         )}
-        {!user.phone && <p style={{ color: theme.textMuted }} className="text-[12px] mt-3">Телефон не указан — позвонить нельзя.</p>}
+        {!user.phone && <p style={{ color: theme.textMuted }} className="text-[12px] mt-3">Телефон не указан — видеозвонок недоступен.</p>}
       </div>
+
+      {confirmCall && (
+        <ConfirmDialog theme={theme}
+          title="Начать видеозвонок?"
+          message={`Вызов будет отправлен: ${user.fullName} (${user.phone}).`}
+          confirmLabel="Позвонить"
+          danger={false}
+          onCancel={() => setConfirmCall(null)}
+          onConfirm={() => {
+            const href = confirmCall;
+            setConfirmCall(null);
+            window.location.href = href;
+          }} />
+      )}
     </Modal>
   );
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"errors"
 	"log/slog"
 	"os"
@@ -26,7 +27,14 @@ func main() {
 }
 
 func run() error {
-	cfg, err := config.Load()
+	// Путь к конфигурации задаётся флагом либо переменной окружения.
+	// Флаг важнее: в systemd-юните удобно передать его прямо в
+	// ExecStart, не заводя ради этого файл окружения.
+	configPath := flag.String("config", os.Getenv("CONFIG_FILE"),
+		"путь к config.yaml (по умолчанию ищется ./config.yaml)")
+	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
 	}

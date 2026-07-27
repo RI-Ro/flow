@@ -22,6 +22,7 @@ const taskSelect = `
 	       to_char(t.due_date, 'YYYY-MM-DD'), t.position, t.tags, t.completed_at, t.created_by,
 	       COALESCE(app.task_access(t.id, $1), 'read'),
 	       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.user_id IS NOT NULL), '{}'),
+	       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.completed_at IS NOT NULL), '{}'),
 	       (SELECT count(*) FROM app.comments c    WHERE c.task_id = t.id),
 	       (SELECT count(*) FROM app.attachments f WHERE f.task_id = t.id),
 	       t.created_at, t.updated_at, b.title
@@ -35,7 +36,7 @@ func scanTasks(rows pgx.Rows) ([]models.Task, error) {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.BoardID, &t.ColumnID, &t.Title, &t.Description,
 			&t.Priority, &t.Color, &t.DueDate, &t.Position, &t.Tags, &t.CompletedAt, &t.CreatedBy, &t.Access,
-			&t.Assignees, &t.CommentCnt, &t.AttachCnt, &t.CreatedAt, &t.UpdatedAt,
+			&t.Assignees, &t.AssigneesDone, &t.CommentCnt, &t.AttachCnt, &t.CreatedAt, &t.UpdatedAt,
 			&t.BoardTitle); err != nil {
 			return nil, err
 		}
@@ -146,6 +147,7 @@ func (s *Server) Inbox(c *fiber.Ctx) error {
 			       to_char(t.due_date, 'YYYY-MM-DD'), t.position, t.tags, t.completed_at, t.created_by,
 			       COALESCE(app.task_access(t.id, $1), 'read'),
 			       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.user_id IS NOT NULL), '{}'),
+	       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.completed_at IS NOT NULL), '{}'),
 			       (SELECT count(*) FROM app.comments c    WHERE c.task_id = t.id),
 			       (SELECT count(*) FROM app.attachments f WHERE f.task_id = t.id),
 			       t.created_at, t.updated_at, b.title
@@ -165,7 +167,7 @@ func (s *Server) Inbox(c *fiber.Ctx) error {
 			var t models.Task
 			if e := rows.Scan(&t.ID, &t.BoardID, &t.ColumnID, &t.Title, &t.Description,
 				&t.Priority, &t.Color, &t.DueDate, &t.Position, &t.Tags, &t.CompletedAt, &t.CreatedBy, &t.Access,
-				&t.Assignees, &t.CommentCnt, &t.AttachCnt, &t.CreatedAt, &t.UpdatedAt,
+				&t.Assignees, &t.AssigneesDone, &t.CommentCnt, &t.AttachCnt, &t.CreatedAt, &t.UpdatedAt,
 				&t.BoardTitle); e != nil {
 				return e
 			}
@@ -671,18 +673,32 @@ func (s *Server) CreateStep(c *fiber.Ctx) error {
 		return httpx.Fail(c, httpx.Err(fiber.StatusBadRequest, "empty_step", "Текст шага не может быть пустым"))
 	}
 
+	uid := s.uid(c)
 	var st models.Step
-	err = s.db.AsUser(c.Context(), s.uid(c), func(tx pgx.Tx) error {
-		return tx.QueryRow(c.Context(), `
+	var watchers []uuid.UUID
+	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
+		if e := tx.QueryRow(c.Context(), `
 			INSERT INTO app.task_steps (task_id, body, position)
 			VALUES ($1, $2, COALESCE((SELECT max(position) + 1 FROM app.task_steps WHERE task_id = $1), 0))
 			RETURNING id, body, done, position`,
-			taskID, body).Scan(&st.ID, &st.Body, &st.Done, &st.Position)
+			taskID, body).Scan(&st.ID, &st.Body, &st.Done, &st.Position); e != nil {
+			return e
+		}
+		entry := "Добавлен пункт чек-листа «" + st.Body + "»"
+		if _, e := tx.Exec(c.Context(),
+			`INSERT INTO app.activity (task_id, actor_id, body) VALUES ($1, $2, $3)`,
+			taskID, uid, entry); e != nil {
+			return e
+		}
+		var e error
+		watchers, e = s.notifyWatchers(c.Context(), tx, taskID, uid, entry)
+		return e
 	})
 	if err != nil {
 		return httpx.Fail(c, err)
 	}
 	go s.publishStep(taskID, st, "created")
+	go s.pingNotifications(watchers)
 	return httpx.JSON(c, fiber.StatusCreated, st)
 }
 
@@ -710,6 +726,7 @@ func (s *Server) RenameStep(c *fiber.Ctx) error {
 	uid := s.uid(c)
 
 	var st models.Step
+	var watchers []uuid.UUID
 	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
 		var canEdit bool
 		if e := tx.QueryRow(c.Context(),
@@ -719,11 +736,31 @@ func (s *Server) RenameStep(c *fiber.Ctx) error {
 		if !canEdit {
 			return httpx.Err(fiber.StatusForbidden, "forbidden", "Изменить текст шага может только редактор задачи")
 		}
-		return tx.QueryRow(c.Context(), `
+		// Прежний текст нужен для записи в историю: «переименован
+		// пункт» без указания, что было раньше, невозможно
+		// сопоставить с тем, что человек видел на экране.
+		var before string
+		if e := tx.QueryRow(c.Context(),
+			`SELECT body FROM app.task_steps WHERE id = $1 AND task_id = $2`,
+			stepID, taskID).Scan(&before); e != nil {
+			return e
+		}
+		if e := tx.QueryRow(c.Context(), `
 			UPDATE app.task_steps SET body = $3
 			 WHERE id = $1 AND task_id = $2
 			 RETURNING id, body, done, position`,
-			stepID, taskID, body).Scan(&st.ID, &st.Body, &st.Done, &st.Position)
+			stepID, taskID, body).Scan(&st.ID, &st.Body, &st.Done, &st.Position); e != nil {
+			return e
+		}
+		entry := "Пункт чек-листа «" + before + "» изменён на «" + st.Body + "»"
+		if _, e := tx.Exec(c.Context(),
+			`INSERT INTO app.activity (task_id, actor_id, body) VALUES ($1, $2, $3)`,
+			taskID, uid, entry); e != nil {
+			return e
+		}
+		var e error
+		watchers, e = s.notifyWatchers(c.Context(), tx, taskID, uid, entry)
+		return e
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.Fail(c, httpx.ErrNotFound)
@@ -732,6 +769,7 @@ func (s *Server) RenameStep(c *fiber.Ctx) error {
 		return httpx.Fail(c, err)
 	}
 	go s.publishStep(taskID, st, "updated")
+	go s.pingNotifications(watchers)
 	return httpx.JSON(c, fiber.StatusOK, st)
 }
 
@@ -811,11 +849,40 @@ func (s *Server) DeleteStep(c *fiber.Ctx) error {
 	if err != nil {
 		return httpx.Fail(c, err)
 	}
+	uid := s.uid(c)
 	var affected int64
-	err = s.db.AsUser(c.Context(), s.uid(c), func(tx pgx.Tx) error {
+	var watchers []uuid.UUID
+	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
+		// Текст удаляемого пункта читаем до удаления: после DELETE
+		// восстановить его для записи в историю уже неоткуда, а
+		// «удалён пункт» без названия ничего не говорит.
+		var body string
+		if e := tx.QueryRow(c.Context(),
+			`SELECT body FROM app.task_steps WHERE id = $1 AND task_id = $2`,
+			stepID, taskID).Scan(&body); e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				return nil // строки нет — affected останется 0
+			}
+			return e
+		}
+
 		tag, e := tx.Exec(c.Context(),
 			`DELETE FROM app.task_steps WHERE id = $1 AND task_id = $2`, stepID, taskID)
+		if e != nil {
+			return e
+		}
 		affected = tag.RowsAffected()
+		if affected == 0 {
+			return nil
+		}
+
+		entry := "Удалён пункт чек-листа «" + body + "»"
+		if _, e := tx.Exec(c.Context(),
+			`INSERT INTO app.activity (task_id, actor_id, body) VALUES ($1, $2, $3)`,
+			taskID, uid, entry); e != nil {
+			return e
+		}
+		watchers, e = s.notifyWatchers(c.Context(), tx, taskID, uid, entry)
 		return e
 	})
 	if err != nil {
@@ -825,6 +892,7 @@ func (s *Server) DeleteStep(c *fiber.Ctx) error {
 		return httpx.Fail(c, httpx.ErrForbidden)
 	}
 	go s.publishStep(taskID, models.Step{ID: stepID}, "deleted")
+	go s.pingNotifications(watchers)
 	return httpx.NoContent(c)
 }
 
@@ -939,5 +1007,84 @@ func (s *Server) SetGrants(c *fiber.Ctx) error {
 		return httpx.Fail(c, err)
 	}
 	go s.publishTask(t, "updated")
+	return httpx.JSON(c, fiber.StatusOK, t)
+}
+
+type assignmentDoneInput struct {
+	Completed bool `json:"completed"`
+}
+
+// CompleteAssignment — отметка исполнителя о выполнении СВОЕЙ части.
+//
+// Права проверяет политика task_assignees_self_update: обновить можно
+// только строку со своим user_id. Поэтому здесь нет отдельной проверки
+// «а исполнитель ли он» — если человек в исполнителях не числится,
+// строки для обновления просто не найдётся, и мы вернём 403.
+//
+// Автор задачи не может отметиться за исполнителя: это сознательно.
+// Отметка означает «я сделал», и право поставить её за другого лишило
+// бы её смысла. Закрыть задачу целиком автор по-прежнему может кнопкой
+// «Пометить завершённой» — это другое действие.
+func (s *Server) CompleteAssignment(c *fiber.Ctx) error {
+	taskID, err := param(c, "taskID")
+	if err != nil {
+		return httpx.Fail(c, err)
+	}
+	var in assignmentDoneInput
+	if err := httpx.Decode(c, &in); err != nil {
+		return httpx.Fail(c, err)
+	}
+	uid := s.uid(c)
+
+	var affected int64
+	var watchers []uuid.UUID
+	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
+		tag, e := tx.Exec(c.Context(), `
+			UPDATE app.task_assignees
+			   SET completed_at = CASE WHEN $3 THEN now() ELSE NULL END
+			 WHERE task_id = $1 AND user_id = $2`, taskID, uid, in.Completed)
+		if e != nil {
+			return e
+		}
+		affected = tag.RowsAffected()
+		if affected == 0 {
+			return nil
+		}
+
+		// Имя берём из справочника, чтобы запись в истории читалась без
+		// подстановки на клиенте: история задачи должна оставаться
+		// понятной и через год, когда состав исполнителей уже другой.
+		var name string
+		if e := tx.QueryRow(c.Context(),
+			`SELECT full_name FROM app.users WHERE id = $1`, uid).Scan(&name); e != nil {
+			return e
+		}
+
+		body := name + " отметил(а) свою часть выполненной"
+		if !in.Completed {
+			body = name + " снял(а) отметку о выполнении"
+		}
+		if _, e := tx.Exec(c.Context(),
+			`INSERT INTO app.activity (task_id, actor_id, body) VALUES ($1, $2, $3)`,
+			taskID, uid, body); e != nil {
+			return e
+		}
+		watchers, e = s.notifyWatchers(c.Context(), tx, taskID, uid, body)
+		return e
+	})
+	if err != nil {
+		return httpx.Fail(c, err)
+	}
+	if affected == 0 {
+		return httpx.Fail(c, httpx.Err(fiber.StatusForbidden, "not_assignee",
+			"Отметить выполнение может только исполнитель этой задачи"))
+	}
+
+	t, err := s.loadTask(c, taskID)
+	if err != nil {
+		return httpx.Fail(c, err)
+	}
+	go s.publishTask(t, "updated")
+	go s.pingNotifications(watchers)
 	return httpx.JSON(c, fiber.StatusOK, t)
 }

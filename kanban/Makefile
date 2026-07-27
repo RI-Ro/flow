@@ -18,6 +18,7 @@ migrate:
 	psql "$(DB)" -v ON_ERROR_STOP=1 -f backend/migrations/0005_admin.sql
 	psql "$(DB)" -v ON_ERROR_STOP=1 -f backend/migrations/0006_task_color.sql
 	psql "$(DB)" -v ON_ERROR_STOP=1 -f backend/migrations/0007_activity_notify.sql
+	psql "$(DB)" -v ON_ERROR_STOP=1 -f backend/migrations/0008_assignee_done.sql
 
 seed:
 	psql "$(DB)" -v ON_ERROR_STOP=1 -f backend/migrations/0003_seed.sql

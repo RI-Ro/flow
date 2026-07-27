@@ -58,7 +58,7 @@ export default function TaskModal({ theme, directory, team, boardMemberIds, colu
       <Field label="Название" theme={theme}>
         <input value={form.title} onChange={(e) => set("title", e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
           autoFocus style={inputStyle(theme)} className="w-full rounded-lg px-3 py-2 text-[13.5px] outline-none"
-          placeholder="Например, «Спроектировать онбординг»" />
+          placeholder="Новая задача" />
       </Field>
 
       <Field label="Описание" theme={theme}>
@@ -81,7 +81,7 @@ export default function TaskModal({ theme, directory, team, boardMemberIds, colu
         </Field>
       </div>
 
-      <Field label="Дедлайн" theme={theme}>
+      <Field label="Срок исполнения" theme={theme}>
         <input type="date" value={String(form.dueDate || "").slice(0, 10)} onChange={(e) => set("dueDate", e.target.value)}
           style={inputStyle(theme)} className="w-full rounded-lg px-3 py-2 text-[13px] outline-none" />
       </Field>

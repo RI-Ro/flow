@@ -53,11 +53,12 @@ INSERT INTO app.columns (board_id, title, color, position, wip_limit, is_done)
 SELECT b.id, c.title, c.color, c.pos, c.wip, c.done
   FROM app.boards b
  CROSS JOIN (VALUES
-    ('Бэклог',       '#8892A8', 0, 0, false),
-    ('К выполнению', '#3D9B94', 1, 6, false),
-    ('В работе',     '#C99A2E', 2, 4, false),
-    ('На проверке',  '#8B6BB1', 3, 3, false),
-    ('Готово',       '#4F9B6A', 4, 0, true)
+    ('К выполнению',    '#8892A8', 0, 0, false),
+    ('В работе',        '#C99A2E', 1, 4, false),
+    ('На проверке',     '#8B6BB1', 2, 3, false),
+    ('На согласовании', '#3D9B94', 3, 3, false),
+    ('На докладе',      '#C2703D', 4, 2, false),
+    ('Готово',          '#4F9B6A', 5, 0, true)
  ) AS c(title, color, pos, wip, done)
  WHERE b.id IN ('a0000000-0000-4000-8000-000000000001','a0000000-0000-4000-8000-000000000002')
    AND NOT EXISTS (SELECT 1 FROM app.columns x WHERE x.board_id = b.id);
