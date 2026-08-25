@@ -166,6 +166,8 @@ func (s *Server) App() *fiber.App {
 	// Отметка исполнителя о своей части — отдельно от закрытия задачи
 	// целиком: это разные действия с разными правами.
 	tasks.Post("/assignment", s.CompleteAssignment)
+	tasks.Get("/links", s.ListTaskLinks)
+	tasks.Post("/links", s.CreateTaskLink)
 	tasks.Post("/steps", s.CreateStep)
 	tasks.Patch("/steps/:stepID", s.RenameStep)
 	tasks.Post("/steps/:stepID/toggle", s.ToggleStep)
@@ -187,6 +189,31 @@ func (s *Server) App() *fiber.App {
 	// Администрирование учётных записей. RequireAdmin проверяет права
 	// запросом к базе на каждый вызов, а не по полю в токене, — иначе
 	// снятие прав вступало бы в силу только через 15 минут.
+	// Делегирование, связи задач, шаблоны — три возможности, чья схема
+	// заведена миграцией 0010_structure.sql.
+	// Дашборд: агрегаты считаются в базе под RLS, поэтому в статистику
+	// попадает ровно то, что человеку доступно.
+	// Календарь: задачи со сроком в диапазоне, из всех доступных
+	// проектов сразу.
+	private.Get("/calendar", s.Calendar)
+
+	private.Get("/dashboard", s.Dashboard)
+	private.Get("/dashboard/users/:userID/tasks", s.DashboardUserTasks)
+
+	private.Get("/delegations", s.ListDelegations)
+	// Действующие замещения всех сотрудников: нужны, чтобы в карточке
+	// человека было видно, что он в отпуске и кто его замещает.
+	private.Get("/delegations/active", s.ActiveDelegations)
+	private.Post("/delegations", s.CreateDelegation)
+	private.Delete("/delegations/:id", s.DeleteDelegation)
+
+	private.Get("/templates", s.ListTemplates)
+	private.Post("/templates", s.CreateTemplate)
+	private.Delete("/templates/:id", s.DeleteTemplate)
+	private.Post("/templates/:id/apply", s.ApplyTemplate)
+
+	private.Delete("/links/:id", s.DeleteTaskLink)
+
 	admin := private.Group("/admin", s.RequireAdmin)
 	admin.Get("/users", s.AdminListUsers)
 	admin.Post("/users", s.AdminCreateUser)

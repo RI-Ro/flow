@@ -30,7 +30,7 @@ export default function Login({ theme, onSuccess }) {
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}` }} className="w-full max-w-sm rounded-2xl p-6">
         <div className="flex items-center gap-2 mb-1">
           <LayoutGrid size={22} style={{ color: theme.accent }} />
-          <span style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-bold text-[19px]">Команда</span>
+          <span style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }} className="font-bold text-[19px]">Команда</span>
         </div>
         <p style={{ color: theme.textMuted }} className="text-[13px] mb-5">{mode === "login" ? "Вход в систему планирования задач" : "Создание учётной записи"}</p>
 

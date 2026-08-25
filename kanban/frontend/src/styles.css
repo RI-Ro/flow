@@ -6,7 +6,7 @@
   html, body, #root { height: 100%; }
   body {
     margin: 0;
-    font-family: Inter, system-ui, -apple-system, sans-serif;
+    font-family: Manrope, system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   body.dragging { user-select: none; }
@@ -25,4 +25,27 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* Моноширинные подписи в духе balun.courses: метки, счётчики,
+   технические заголовки вида «// проекты». Основной текст остаётся
+   пропорциональным — моно везде читается тяжело. */
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: 0.02em;
+}
+
+/* Мягкое свечение вокруг акцентных элементов. Радиус намеренно
+   большой и размытый: жёсткая тень выглядит как ошибка отрисовки,
+   а рассеянная читается как подсветка. */
+.glow {
+  box-shadow: 0 0 0 1px var(--glow-color, transparent),
+              0 6px 24px -8px var(--glow-color, transparent);
+}
+
+/* Hairline-рамка: на плотных тёмных фонах обычный 1px выглядит
+   грубо, поэтому граница даётся полупрозрачной. */
+.hairline {
+  border-width: 1px;
+  border-style: solid;
 }

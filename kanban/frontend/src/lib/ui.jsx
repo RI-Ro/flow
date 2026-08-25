@@ -64,7 +64,7 @@ export function ModalHeader({ theme, title, subtitle, onClose, extra }) {
   return (
     <div className="flex items-start justify-between mb-4 gap-3">
       <div className="min-w-0">
-        <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[17px] leading-tight">
+        <h3 style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }} className="font-semibold text-[17px] leading-tight">
           {title}
         </h3>
         {subtitle && <p style={{ color: theme.textMuted }} className="text-[12px] mt-1">{subtitle}</p>}
@@ -82,7 +82,7 @@ export function ConfirmDialog({ theme, title, message, confirmLabel = "Удал�
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }}
       onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}` }} className="rounded-2xl w-full max-w-sm p-5">
-        <h4 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[16px] mb-2">{title}</h4>
+        <h4 style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }} className="font-semibold text-[16px] mb-2">{title}</h4>
         <p style={{ color: theme.textMuted }} className="text-[13px] leading-relaxed mb-5">{message}</p>
         <div className="flex gap-2">
           <button onClick={onCancel} style={{ background: theme.surfaceAlt, color: theme.text, border: `1px solid ${theme.border}` }}
@@ -128,7 +128,7 @@ export function Toggle({ theme, checked, onChange, label }) {
   );
 }
 
-export function UserCard({ theme, user, onClose }) {
+export function UserCard({ theme, user, onClose, delegation, directory }) {
   // Хук объявляется до раннего возврата: порядок вызовов хуков должен
   // быть одинаковым при каждом рендере.
   const [confirmCall, setConfirmCall] = React.useState(null);
@@ -139,12 +139,31 @@ export function UserCard({ theme, user, onClose }) {
     <Modal theme={theme} onClose={onClose} width="max-w-xs">
       <div className="flex flex-col items-center text-center">
         <Avatar user={user} size={64} theme={theme} />
-        <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[17px] mt-3">{user.fullName}</h3>
+        <h3 style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }} className="font-semibold text-[17px] mt-3">{user.fullName}</h3>
         {user.deleted ? (
           <p style={{ color: theme.warning }} className="text-[12.5px] mt-1">Учётная запись отключена</p>
         ) : (
           <p style={{ color: theme.textMuted }} className="text-[13px] mt-0.5">{user.position || "Должность не указана"}</p>
         )}
+        {/* Факт замещения виден всем, кто открыл карточку: без этого
+            задачи уходят человеку в отпуске и повисают. Показываем
+            заместителя, причину и срок — этого достаточно, чтобы
+            понять, к кому обращаться. */}
+        {delegation && (
+          <div style={{ background: theme.surfaceAlt, border: `1px solid ${theme.warning}` }}
+            className="w-full mt-3 rounded-lg p-2.5 text-left">
+            <div className="mono text-[9.5px] uppercase tracking-wider mb-1"
+              style={{ color: theme.warning }}>// отсутствует</div>
+            <div style={{ color: theme.text }} className="text-[12px] leading-snug">
+              Замещает: <b>{delegation.deputyName}</b>
+            </div>
+            <div style={{ color: theme.textMuted }} className="text-[11px] mt-0.5">
+              {delegation.note ? `${delegation.note} · ` : ""}
+              до {delegation.endsAtLabel}
+            </div>
+          </div>
+        )}
+
         <div className="w-full mt-4 space-y-2">
           {user.email && (
             <a href={`mailto:${user.email}`} style={{ background: theme.surfaceAlt, color: theme.text }}

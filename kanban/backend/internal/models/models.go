@@ -38,6 +38,11 @@ type Board struct {
 	BgBlur      bool          `json:"bgBlur"`
 	Archived    bool          `json:"archived"`
 	MyRole      string        `json:"myRole"`
+	// Дерево проектов. Если родитель недоступен текущему пользователю,
+	// клиент кладёт узел в корень — сервер отдаёт parentId как есть.
+	ParentID    *uuid.UUID    `json:"parentId"`
+	Position    int           `json:"position"`
+	CreatedBy   uuid.UUID     `json:"createdBy"`
 	Members     []BoardMember `json:"members,omitempty"`
 	UpdatedAt   time.Time     `json:"updatedAt"`
 }
@@ -110,6 +115,9 @@ type Task struct {
 	// значения зависят от темы и подставляются на клиенте.
 	Color       string      `json:"color"`
 	DueDate     *string     `json:"dueDate"`
+	// Реквизиты входящего документа, по которому заведена задача.
+	IncomingNumber string  `json:"incomingNumber"`
+	IncomingDate   *string `json:"incomingDate"`
 	Position    int         `json:"position"`
 	Tags        []string    `json:"tags"`
 	CompletedAt *time.Time  `json:"completedAt"`
@@ -135,4 +143,44 @@ type Notification struct {
 	TaskID    *uuid.UUID `json:"taskId"`
 	Read      bool       `json:"read"`
 	CreatedAt time.Time  `json:"createdAt"`
+}
+
+// Delegation — передача прав заместителю на время отсутствия.
+type Delegation struct {
+	ID        uuid.UUID `json:"id"`
+	GrantorID uuid.UUID `json:"grantorId"`
+	DeputyID  uuid.UUID `json:"deputyId"`
+	StartsAt  string    `json:"startsAt"`
+	EndsAt    string    `json:"endsAt"`
+	Note      string    `json:"note"`
+	Active    bool      `json:"active"`
+}
+
+// TaskLink — связь между задачами: blocks | relates | subtask.
+type TaskLink struct {
+	ID        uuid.UUID `json:"id"`
+	FromTask  uuid.UUID `json:"fromTask"`
+	ToTask    uuid.UUID `json:"toTask"`
+	Kind      string    `json:"kind"`
+	// Заголовок и состояние связанной задачи, чтобы не запрашивать
+	// каждую отдельно при отрисовке списка связей.
+	Title     string    `json:"title"`
+	Completed bool      `json:"completed"`
+	BoardID   uuid.UUID `json:"boardId"`
+}
+
+// TaskTemplate — заготовка задачи, из которой создаётся экземпляр.
+type TaskTemplate struct {
+	ID          uuid.UUID   `json:"id"`
+	BoardID     *uuid.UUID  `json:"boardId"`
+	OwnerID     uuid.UUID   `json:"ownerId"`
+	Name        string      `json:"name"`
+	Title       string      `json:"title"`
+	Description string      `json:"description"`
+	Priority    string      `json:"priority"`
+	Color       string      `json:"color"`
+	Tags        []string    `json:"tags"`
+	DueInDays   *int        `json:"dueInDays"`
+	Steps       []string    `json:"steps"`
+	Assignees   []uuid.UUID `json:"assignees"`
 }

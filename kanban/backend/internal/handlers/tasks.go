@@ -19,7 +19,8 @@ import (
 // вообще поставил задачу в чужом проекте, не открывая карточку.
 const taskSelect = `
 	SELECT t.id, t.board_id, t.column_id, t.title, t.description, t.priority::text, t.color,
-	       to_char(t.due_date, 'YYYY-MM-DD'), t.position, t.tags, t.completed_at, t.created_by,
+	       to_char(t.due_date, 'YYYY-MM-DD'),
+	       t.incoming_number, to_char(t.incoming_date, 'YYYY-MM-DD'), t.position, t.tags, t.completed_at, t.created_by,
 	       COALESCE(app.task_access(t.id, $1), 'read'),
 	       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.user_id IS NOT NULL), '{}'),
 	       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.completed_at IS NOT NULL), '{}'),
@@ -35,7 +36,7 @@ func scanTasks(rows pgx.Rows) ([]models.Task, error) {
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.BoardID, &t.ColumnID, &t.Title, &t.Description,
-			&t.Priority, &t.Color, &t.DueDate, &t.Position, &t.Tags, &t.CompletedAt, &t.CreatedBy, &t.Access,
+			&t.Priority, &t.Color, &t.DueDate, &t.IncomingNumber, &t.IncomingDate, &t.Position, &t.Tags, &t.CompletedAt, &t.CreatedBy, &t.Access,
 			&t.Assignees, &t.AssigneesDone, &t.CommentCnt, &t.AttachCnt, &t.CreatedAt, &t.UpdatedAt,
 			&t.BoardTitle); err != nil {
 			return nil, err
@@ -144,7 +145,8 @@ func (s *Server) Inbox(c *fiber.Ctx) error {
 	err := s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
 		rows, e := tx.Query(c.Context(), `
 			SELECT t.id, t.board_id, t.column_id, t.title, t.description, t.priority::text, t.color,
-			       to_char(t.due_date, 'YYYY-MM-DD'), t.position, t.tags, t.completed_at, t.created_by,
+			       to_char(t.due_date, 'YYYY-MM-DD'),
+			       t.incoming_number, to_char(t.incoming_date, 'YYYY-MM-DD'), t.position, t.tags, t.completed_at, t.created_by,
 			       COALESCE(app.task_access(t.id, $1), 'read'),
 			       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.user_id IS NOT NULL), '{}'),
 	       COALESCE(array_agg(DISTINCT a.user_id) FILTER (WHERE a.completed_at IS NOT NULL), '{}'),
@@ -166,7 +168,7 @@ func (s *Server) Inbox(c *fiber.Ctx) error {
 		for rows.Next() {
 			var t models.Task
 			if e := rows.Scan(&t.ID, &t.BoardID, &t.ColumnID, &t.Title, &t.Description,
-				&t.Priority, &t.Color, &t.DueDate, &t.Position, &t.Tags, &t.CompletedAt, &t.CreatedBy, &t.Access,
+				&t.Priority, &t.Color, &t.DueDate, &t.IncomingNumber, &t.IncomingDate, &t.Position, &t.Tags, &t.CompletedAt, &t.CreatedBy, &t.Access,
 				&t.Assignees, &t.AssigneesDone, &t.CommentCnt, &t.AttachCnt, &t.CreatedAt, &t.UpdatedAt,
 				&t.BoardTitle); e != nil {
 				return e
@@ -254,6 +256,8 @@ type taskInput struct {
 	Description string      `json:"description"`
 	Priority    string      `json:"priority"`
 	Color       string      `json:"color"`
+	IncomingNumber string   `json:"incomingNumber"`
+	IncomingDate   *string  `json:"incomingDate"`
 	ColumnID    uuid.UUID   `json:"columnId"`
 	DueDate     *string     `json:"dueDate"`
 	Tags        []string    `json:"tags"`
@@ -303,11 +307,11 @@ func (s *Server) CreateTask(c *fiber.Ctx) error {
 	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
 		if _, e := tx.Exec(c.Context(), `
 			INSERT INTO app.tasks (id, board_id, column_id, title, description, priority, color,
-			                       due_date, tags, position, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6::app.task_priority, $7, $8::date, $9,
-			        COALESCE((SELECT max(position) + 1 FROM app.tasks WHERE column_id = $3), 0), $10)`,
+			                       due_date, tags, incoming_number, incoming_date, position, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6::app.task_priority, $7, $8::date, $9, $10, $11::date,
+			        COALESCE((SELECT max(position) + 1 FROM app.tasks WHERE column_id = $3), 0), $12)`,
 			taskID, boardID, in.ColumnID, in.Title, in.Description, in.Priority, in.Color,
-			in.DueDate, in.Tags, uid); e != nil {
+			in.DueDate, in.Tags, in.IncomingNumber, in.IncomingDate, uid); e != nil {
 			return e
 		}
 		var e error
@@ -362,6 +366,8 @@ type taskPatch struct {
 	Description *string      `json:"description"`
 	Priority    *string      `json:"priority"`
 	Color       *string      `json:"color"`
+	IncomingNumber *string   `json:"incomingNumber"`
+	IncomingDate   *string   `json:"incomingDate"`
 	ColumnID    *uuid.UUID   `json:"columnId"`
 	DueDate     *string      `json:"dueDate"`
 	Tags        *[]string    `json:"tags"`
@@ -390,9 +396,12 @@ func (s *Server) UpdateTask(c *fiber.Ctx) error {
 				color       = COALESCE($5, color),
 				column_id   = COALESCE($6, column_id),
 				due_date    = COALESCE($7::date, due_date),
-				tags        = COALESCE($8, tags)
+				tags        = COALESCE($8, tags),
+				incoming_number = COALESCE($9, incoming_number),
+				incoming_date   = COALESCE($10::date, incoming_date)
 			WHERE id = $1`,
-			taskID, in.Title, in.Description, in.Priority, in.Color, in.ColumnID, in.DueDate, in.Tags)
+			taskID, in.Title, in.Description, in.Priority, in.Color, in.ColumnID, in.DueDate, in.Tags,
+			in.IncomingNumber, in.IncomingDate)
 		if e != nil {
 			return e
 		}
@@ -550,6 +559,41 @@ func (s *Server) CompleteTask(c *fiber.Ctx) error {
 	uid := s.uid(c)
 
 	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
+		// Завершить задачу вправе только её автор или владелец проекта.
+		// Исполнитель сообщает о готовности отметкой о сдаче
+		// (POST /assignment) — принимает работу поставивший.
+		var canClose bool
+		if e := tx.QueryRow(c.Context(),
+			`SELECT app.can_close_task($1, $2)`, taskID, uid).Scan(&canClose); e != nil {
+			return e
+		}
+		if !canClose {
+			return httpx.Err(fiber.StatusForbidden, "not_author",
+				"Завершить задачу может только её автор. Отметьте выполнение своей части — автор примет работу")
+		}
+
+		// Связь «блокирует» должна что-то значить, иначе она просто
+		// пометка. Пока блокирующая задача не закрыта, закрыть
+		// заблокированную нельзя — проверка на сервере, а не только в
+		// интерфейсе: иначе её обойдёт любой прямой запрос.
+		if in.Completed {
+			var blocker string
+			e := tx.QueryRow(c.Context(), `
+				SELECT b.title
+				  FROM app.task_links l
+				  JOIN app.tasks b ON b.id = l.from_task
+				 WHERE l.to_task = $1 AND l.kind = 'blocks'
+				   AND b.completed_at IS NULL
+				 LIMIT 1`, taskID).Scan(&blocker)
+			if e == nil {
+				return httpx.Err(fiber.StatusConflict, "blocked",
+					"Задача заблокирована: сначала завершите «"+blocker+"»")
+			}
+			if !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+		}
+
 		var boardID uuid.UUID
 		if e := tx.QueryRow(c.Context(),
 			`SELECT board_id FROM app.tasks WHERE id = $1`, taskID).Scan(&boardID); e != nil {

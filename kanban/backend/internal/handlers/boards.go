@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -23,10 +24,11 @@ func (s *Server) ListBoards(c *fiber.Ctx) error {
 	err := s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
 		rows, e := tx.Query(c.Context(), `
 			SELECT b.id, b.title, b.description, b.bg_preset, b.bg_file_id, b.bg_blur,
-			       b.archived, m.role::text, b.updated_at
+			       b.archived, m.role::text, b.parent_id, b.position, b.created_by, b.updated_at
 			  FROM app.boards b
-			  JOIN app.board_members m ON m.board_id = b.id AND m.user_id = $1
-			 ORDER BY b.title`, uid)
+			  JOIN app.board_members m ON m.board_id = b.id
+			                          AND m.user_id IN (SELECT app.effective_users($1))
+			 ORDER BY b.position, b.title`, uid)
 		if e != nil {
 			return e
 		}
@@ -34,7 +36,8 @@ func (s *Server) ListBoards(c *fiber.Ctx) error {
 		for rows.Next() {
 			var b models.Board
 			if e := rows.Scan(&b.ID, &b.Title, &b.Description, &b.BgPreset, &b.BgFileID,
-				&b.BgBlur, &b.Archived, &b.MyRole, &b.UpdatedAt); e != nil {
+				&b.BgBlur, &b.Archived, &b.MyRole, &b.ParentID, &b.Position, &b.CreatedBy,
+				&b.UpdatedAt); e != nil {
 				return e
 			}
 			boards = append(boards, b)
@@ -58,10 +61,12 @@ func (s *Server) GetBoard(c *fiber.Ctx) error {
 	err = s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
 		e := tx.QueryRow(c.Context(), `
 			SELECT b.id, b.title, b.description, b.bg_preset, b.bg_file_id, b.bg_blur,
-			       b.archived, COALESCE(app.board_role(b.id, $2), ''), b.updated_at
+			       b.archived, COALESCE(app.board_role(b.id, $2), ''),
+			       b.parent_id, b.position, b.created_by, b.updated_at
 			  FROM app.boards b WHERE b.id = $1`, boardID, uid).
 			Scan(&b.ID, &b.Title, &b.Description, &b.BgPreset, &b.BgFileID,
-				&b.BgBlur, &b.Archived, &b.MyRole, &b.UpdatedAt)
+				&b.BgBlur, &b.Archived, &b.MyRole, &b.ParentID, &b.Position, &b.CreatedBy,
+				&b.UpdatedAt)
 		if e != nil {
 			return e
 		}
@@ -95,6 +100,7 @@ type boardInput struct {
 	Description string `json:"description"`
 	BgPreset    string `json:"bgPreset"`
 	BgBlur      bool   `json:"bgBlur"`
+	ParentID    *uuid.UUID `json:"parentId"`
 }
 
 var defaultColumns = []struct {
@@ -105,10 +111,9 @@ var defaultColumns = []struct {
 }{
 	{"К выполнению", "#8892A8", 0, false},
 	{"В работе", "#C99A2E", 4, false},
-	{"На проверке", "#8B6BB1", 3, false},
 	{"На согласовании", "#3D9B94", 3, false},
 	{"На докладе", "#C2703D", 2, false},
-	{"Готово", "#4F9B6A", 0, true},
+	{"Исполнено", "#4F9B6A", 0, true},
 }
 
 func (s *Server) CreateBoard(c *fiber.Ctx) error {
@@ -138,9 +143,12 @@ func (s *Server) CreateBoard(c *fiber.Ctx) error {
 		// ещё нет, политика отвечает «не видно», и создание проекта
 		// отвергается как отказ доступа.
 		if _, e := tx.Exec(c.Context(), `
-			INSERT INTO app.boards (id, title, description, bg_preset, bg_blur, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			boardID, in.Title, in.Description, in.BgPreset, in.BgBlur, uid); e != nil {
+			INSERT INTO app.boards (id, title, description, bg_preset, bg_blur, parent_id,
+			                        position, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6,
+			        COALESCE((SELECT max(position) + 1 FROM app.boards
+			                   WHERE parent_id IS NOT DISTINCT FROM $6), 0), $7)`,
+			boardID, in.Title, in.Description, in.BgPreset, in.BgBlur, in.ParentID, uid); e != nil {
 			return e
 		}
 		for i, col := range defaultColumns {
@@ -165,6 +173,35 @@ type boardPatch struct {
 	BgPreset    *string `json:"bgPreset"`
 	BgBlur      *bool   `json:"bgBlur"`
 	Archived    *bool   `json:"archived"`
+	// Сырой JSON, а не **uuid.UUID.
+	//
+	// Двойной указатель здесь не работает: encoding/json при значении
+	// null обнуляет ВНЕШНИЙ указатель, поэтому «parentId: null»
+	// (вынести в корень) становится неотличимо от «поле не прислано».
+	// Из-за этого зона «вынести в корень» в дереве ничего не делала.
+	// С RawMessage различие сохраняется: nil — поля не было, "null" —
+	// поле есть и равно null.
+	ParentID    json.RawMessage `json:"parentId"`
+	Position    *int            `json:"position"`
+}
+
+// parseParentPatch разбирает поле parentId запроса.
+//   present=false — поле не прислано, родителя не трогаем;
+//   present=true, value=nil — вынести в корень;
+//   present=true, value=&id — перенести под указанный проект.
+func parseParentPatch(raw json.RawMessage) (present bool, value *uuid.UUID, err error) {
+	if len(raw) == 0 {
+		return false, nil, nil
+	}
+	if string(raw) == "null" {
+		return true, nil, nil
+	}
+	var id uuid.UUID
+	if err := json.Unmarshal(raw, &id); err != nil {
+		return true, nil, httpx.Err(fiber.StatusBadRequest, "bad_parent",
+			"Некорректный идентификатор родительского проекта")
+	}
+	return true, &id, nil
 }
 
 func (s *Server) UpdateBoard(c *fiber.Ctx) error {
@@ -177,6 +214,11 @@ func (s *Server) UpdateBoard(c *fiber.Ctx) error {
 		return httpx.Fail(c, err)
 	}
 
+	parentPresent, parentTarget, perr := parseParentPatch(in.ParentID)
+	if perr != nil {
+		return httpx.Fail(c, perr)
+	}
+
 	var affected int64
 	err = s.db.AsUser(c.Context(), s.uid(c), func(tx pgx.Tx) error {
 		tag, e := tx.Exec(c.Context(), `
@@ -185,9 +227,12 @@ func (s *Server) UpdateBoard(c *fiber.Ctx) error {
 				description = COALESCE($3, description),
 				bg_preset   = COALESCE($4, bg_preset),
 				bg_blur     = COALESCE($5, bg_blur),
-				archived    = COALESCE($6, archived)
+				archived    = COALESCE($6, archived),
+				parent_id   = CASE WHEN $7::boolean THEN $8::uuid ELSE parent_id END,
+				position    = COALESCE($9, position)
 			WHERE id = $1`,
-			boardID, in.Title, in.Description, in.BgPreset, in.BgBlur, in.Archived)
+			boardID, in.Title, in.Description, in.BgPreset, in.BgBlur, in.Archived,
+			parentPresent, parentTarget, in.Position)
 		affected = tag.RowsAffected()
 		return e
 	})
@@ -215,10 +260,12 @@ func (s *Server) fetchBoard(c *fiber.Ctx, boardID uuid.UUID) (models.Board, erro
 	err := s.db.AsUser(c.Context(), uid, func(tx pgx.Tx) error {
 		e := tx.QueryRow(c.Context(), `
 			SELECT b.id, b.title, b.description, b.bg_preset, b.bg_file_id, b.bg_blur,
-			       b.archived, COALESCE(app.board_role(b.id, $2), ''), b.updated_at
+			       b.archived, COALESCE(app.board_role(b.id, $2), ''),
+			       b.parent_id, b.position, b.created_by, b.updated_at
 			  FROM app.boards b WHERE b.id = $1`, boardID, uid).
 			Scan(&b.ID, &b.Title, &b.Description, &b.BgPreset, &b.BgFileID,
-				&b.BgBlur, &b.Archived, &b.MyRole, &b.UpdatedAt)
+				&b.BgBlur, &b.Archived, &b.MyRole, &b.ParentID, &b.Position, &b.CreatedBy,
+				&b.UpdatedAt)
 		if e != nil {
 			return e
 		}
@@ -616,3 +663,4 @@ func (s *Server) SaveColumns(c *fiber.Ctx) error {
 	go s.publishColumns(boardID, cols)
 	return httpx.JSON(c, fiber.StatusOK, cols)
 }
+

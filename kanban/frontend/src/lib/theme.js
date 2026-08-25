@@ -1,56 +1,105 @@
+// Оформление в инженерной эстетике balun.courses: тёмная база, один
+// яркий неоновый акцент плюс вторичный для градиентов и подсветки,
+// hairline-рамки, мягкое свечение вокруг акцентных элементов.
+//
+// Ровно 10 тем: 5 тёмных и 5 светлых. Balun — по умолчанию.
+//
+// accent2 и glow — дополнение к базовой палитре: первый идёт в
+// градиенты и вторичные акценты, второй в тени акцентных кнопок.
+// success/warning/danger подобраны под каждую тему отдельно, а не взяты
+// общими: на кислотном лайме и на пастельной розе один и тот же
+// зелёный читается по-разному.
 export const THEMES = {
-  daylight: {
-    name: "Дневная", bg: "#F3F4F1", surface: "#FFFFFF", surfaceAlt: "#EDEEEA",
-    border: "#DEDFDA", text: "#1B1D1B", textMuted: "#6B6F68",
-    accent: "#3D5A80", accentText: "#FFFFFF",
-    success: "#2E7D5B", warning: "#B4780F", danger: "#B23B3B", info: "#3D5A80", dark: false,
-  },
-  moss: {
-    name: "Мох", bg: "#F1F4EE", surface: "#FFFFFF", surfaceAlt: "#E7EDE2",
-    border: "#D6DFD0", text: "#1A211A", textMuted: "#66735F",
-    accent: "#4F7A3D", accentText: "#FFFFFF",
-    success: "#4F7A3D", warning: "#A8760F", danger: "#B03F35", info: "#3D7A6B", dark: false,
-  },
-  violet: {
-    name: "Фиалка", bg: "#F4F2FA", surface: "#FFFFFF", surfaceAlt: "#ECE8F7",
-    border: "#DCD6EE", text: "#1D1830", textMuted: "#6D6588",
-    accent: "#6D4FCF", accentText: "#FFFFFF",
-    success: "#2E7D5B", warning: "#A8760F", danger: "#B23B4F", info: "#6D4FCF", dark: false,
-  },
-  mono: {
-    name: "Моно", bg: "#FAFAFA", surface: "#FFFFFF", surfaceAlt: "#EFEFEF",
-    border: "#D4D4D4", text: "#111111", textMuted: "#6E6E6E",
-    accent: "#111111", accentText: "#FFFFFF",
-    success: "#2E7D5B", warning: "#8A6D1E", danger: "#A3312B", info: "#3A3A3A", dark: false,
+  // ── тёмные ────────────────────────────────────────────────────────
+  balun: {
+    name: "Balun", dark: true,
+    bg: "#0a0a0c", surface: "#131318", surfaceAlt: "#1c1c23", border: "#26262f",
+    text: "#f2f2f5", textMuted: "#8b8b96",
+    accent: "#c8ff2d", accentText: "#0a0a0c", accent2: "#7c5cff",
+    glow: "rgba(200,255,45,.18)",
+    success: "#7ee787", warning: "#ffd166", danger: "#ff6b81", info: "#7c5cff",
   },
   midnight: {
-    name: "Полночь", bg: "#0E1420", surface: "#161E2E", surfaceAlt: "#1D2740",
-    border: "#2A3550", text: "#E7ECF5", textMuted: "#8892A8",
-    accent: "#4FD1C5", accentText: "#0E1420",
-    success: "#3FCB8B", warning: "#E8B04B", danger: "#F2685C", info: "#4FD1C5", dark: true,
+    name: "Midnight", dark: true,
+    bg: "#0a0e1a", surface: "#111826", surfaceAlt: "#182238", border: "#20293d",
+    text: "#e6ecf7", textMuted: "#7e8ba6",
+    accent: "#4f8cff", accentText: "#ffffff", accent2: "#38e8c8",
+    glow: "rgba(79,140,255,.2)",
+    success: "#38e8c8", warning: "#f0b429", danger: "#ff6b81", info: "#4f8cff",
   },
-  contrast: {
-    // Повышенная контрастность: чистый белый фон, чёрный текст, толстые
-    // границы. Для яркого света и для тех, кому мягкие серые оттенки
-    // остальных тем читать тяжело.
-    name: "Контраст", bg: "#FFFFFF", surface: "#FFFFFF", surfaceAlt: "#F0F0F0",
-    border: "#1A1A1A", text: "#000000", textMuted: "#3A3A3A",
-    accent: "#0B44C4", accentText: "#FFFFFF",
-    success: "#0A6B3D", warning: "#8A5A00", danger: "#B3000F", info: "#0B44C4", dark: false,
+  carbon: {
+    name: "Carbon", dark: true,
+    bg: "#000000", surface: "#0c0d0f", surfaceAlt: "#14171b", border: "#20242a",
+    text: "#e8f0f2", textMuted: "#7f8b93",
+    accent: "#22d3ee", accentText: "#001417", accent2: "#34d399",
+    glow: "rgba(34,211,238,.2)",
+    success: "#34d399", warning: "#fbbf24", danger: "#fb7185", info: "#22d3ee",
   },
-  cyber: {
-    name: "Киберпанк", bg: "#0A0716", surface: "#140F26", surfaceAlt: "#1E1738",
-    border: "#3A2E63", text: "#EAE2FF", textMuted: "#9B8AC4",
-    accent: "#00F0FF", accentText: "#0A0716",
-    success: "#3DF5A0", warning: "#FFC93C", danger: "#FF3D7F", info: "#B14BFF", dark: true,
+  graphite: {
+    name: "Graphite", dark: true,
+    bg: "#101012", surface: "#1a1a1e", surfaceAlt: "#232329", border: "#2c2c33",
+    text: "#eceaf0", textMuted: "#8f8b98",
+    accent: "#a78bfa", accentText: "#12101a", accent2: "#f472b6",
+    glow: "rgba(167,139,250,.2)",
+    success: "#6ee7b7", warning: "#fcd34d", danger: "#f472b6", info: "#a78bfa",
   },
   ember: {
-    name: "Закат", bg: "#171310", surface: "#211B16", surfaceAlt: "#2B231C",
-    border: "#3B3025", text: "#F2E9DD", textMuted: "#A99880",
-    accent: "#E8734A", accentText: "#171310",
-    success: "#7FB069", warning: "#E8A23A", danger: "#E85A4F", info: "#E8734A", dark: true,
+    name: "Ember", dark: true,
+    bg: "#120c0a", surface: "#1d1512", surfaceAlt: "#281c17", border: "#372823",
+    text: "#f5ece7", textMuted: "#a68b7f",
+    accent: "#ff7849", accentText: "#1a0d07", accent2: "#ffd166",
+    glow: "rgba(255,120,73,.2)",
+    success: "#86efac", warning: "#ffd166", danger: "#ff5c5c", info: "#ff7849",
+  },
+
+  // ── светлые ───────────────────────────────────────────────────────
+  light: {
+    name: "Light", dark: false,
+    bg: "#f5f6f8", surface: "#ffffff", surfaceAlt: "#eef1f6", border: "#e4e7ec",
+    text: "#15171c", textMuted: "#6b7280",
+    accent: "#4f46e5", accentText: "#ffffff", accent2: "#0ea5e9",
+    glow: "rgba(79,70,229,.14)",
+    success: "#059669", warning: "#b45309", danger: "#dc2626", info: "#4f46e5",
+  },
+  paper: {
+    name: "Paper", dark: false,
+    bg: "#f5f1e8", surface: "#fffdf8", surfaceAlt: "#efe8d8", border: "#e6ddc9",
+    text: "#2a2419", textMuted: "#8a7d63",
+    accent: "#b45309", accentText: "#fffdf8", accent2: "#0f766e",
+    glow: "rgba(180,83,9,.14)",
+    success: "#0f766e", warning: "#a16207", danger: "#b91c1c", info: "#b45309",
+  },
+  mint: {
+    name: "Mint", dark: false,
+    bg: "#eef5f1", surface: "#ffffff", surfaceAlt: "#e3efe8", border: "#d6e6dd",
+    text: "#12241b", textMuted: "#5f7a68",
+    accent: "#059669", accentText: "#ffffff", accent2: "#0d9488",
+    glow: "rgba(5,150,105,.14)",
+    success: "#059669", warning: "#b45309", danger: "#be123c", info: "#0d9488",
+  },
+  frost: {
+    name: "Frost", dark: false,
+    bg: "#eef3f8", surface: "#ffffff", surfaceAlt: "#e5eef6", border: "#dae6f0",
+    text: "#10202e", textMuted: "#5f7590",
+    accent: "#0284c7", accentText: "#ffffff", accent2: "#6366f1",
+    glow: "rgba(2,132,199,.14)",
+    success: "#047857", warning: "#b45309", danger: "#be123c", info: "#0284c7",
+  },
+  rose: {
+    name: "Rose", dark: false,
+    bg: "#faf0f4", surface: "#ffffff", surfaceAlt: "#f5e5ed", border: "#f0dbe4",
+    text: "#2a1620", textMuted: "#8a6b78",
+    accent: "#db2777", accentText: "#ffffff", accent2: "#7c3aed",
+    glow: "rgba(219,39,119,.14)",
+    success: "#047857", warning: "#b45309", danger: "#be123c", info: "#7c3aed",
   },
 };
+
+// Порядок в переключателе: сначала тёмные, потом светлые.
+export const THEME_ORDER = [
+  "balun", "midnight", "carbon", "graphite", "ember",
+  "light", "paper", "mint", "frost", "rose",
+];
 
 const preset = (base, ...spots) => [...spots, base].join(", ");
 
@@ -185,13 +234,9 @@ export const BG_IMAGES = [
   },
 ];
 
-// Готовые изображения, лежащие на сервере (frontend/public/backgrounds,
-// после сборки — в статике). В отличие от пресетов-градиентов выше это
-// настоящие jpg: они одинаковы у всех пользователей и не требуют, чтобы
-// каждый загружал своё.
-//
-// В базе, как и у градиентов, хранится идентификатор, а не путь: если
-// каталог со статикой переедет, менять записи в таблице не придётся.
+// Полный список для выбора фона: сначала однотонные градиенты, затем
+// узорные изображения. Компоненты работают с этим списком, поэтому
+// добавление нового фона не требует правок в интерфейсе.
 export const BG_PHOTOS = [
   { id: "img:dunes",  label: "Дюны" },
   { id: "img:deep",   label: "Глубина" },
@@ -231,16 +276,19 @@ export const BG_PHOTOS = [
   { id: "img:priroda-altay",    label: "Алтай" },
 ];
 
-// Полный список для выбора фона: сначала однотонные градиенты, затем
-// узорные изображения. Компоненты работают с этим списком, поэтому
-// добавление нового фона не требует правок в интерфейсе.
 // Три набора: однотонные градиенты, CSS-узоры и настоящие фотографии
 // из статики сервера. Порядок определяет вид сетки выбора в настройках.
 export const ALL_BACKGROUNDS = [...BG_PRESETS, ...BG_PHOTOS, ...BG_IMAGES];
 
 export const bgById = (id) => ALL_BACKGROUNDS.find((b) => b.id === id) || null;
 
-
+// Готовые изображения, лежащие на сервере (frontend/public/backgrounds,
+// после сборки — в статике). В отличие от пресетов-градиентов выше это
+// настоящие jpg: они одинаковы у всех пользователей и не требуют, чтобы
+// каждый загружал своё.
+//
+// В базе, как и у градиентов, хранится идентификатор, а не путь: если
+// каталог со статикой переедет, менять записи в таблице не придётся.
 
 const imageName = (presetId) =>
   typeof presetId === "string" && presetId.startsWith("img:") ? presetId.slice(4) : null;
@@ -256,11 +304,37 @@ export const bgThumbUrl = (presetId) => {
 };
 
 export const PRIORITIES = {
-  low: { label: "Низкий", color: "info" },
-  medium: { label: "Средний", color: "warning" },
-  high: { label: "Высокий", color: "danger" },
-  urgent: { label: "Срочный", color: "danger" },
+  normal:      { label: "Обычный",       color: "info",    order: 0 },
+  dated:       { label: "Установлен срок", color: "info",  order: 1, requiresDate: true },
+  prompt:      { label: "Оперативно",    color: "warning", order: 2 },
+  urgent:      { label: "Срочно",        color: "danger",  order: 3 },
+  very_urgent: { label: "Весьма срочно", color: "danger",  order: 4 },
 };
+
+// Цвет срока исполнения по остатку времени. Ступени намеренно грубые:
+// точное число дней человек и так видит рядом, а цвет нужен, чтобы
+// оценить состояние доски одним взглядом.
+export const DUE_LEVELS = [
+  { id: "overdue", label: "Просрочено",        maxDays: -1,   light: "#B3000F", dark: "#FF5C6E" },
+  { id: "week1",   label: "Меньше недели",     maxDays: 7,    light: "#C2410C", dark: "#FF8A4C" },
+  { id: "week2",   label: "Меньше двух недель", maxDays: 14,  light: "#B45309", dark: "#F0B429" },
+  { id: "week3",   label: "Меньше трёх недель", maxDays: 21,  light: "#4D7C0F", dark: "#A3D45E" },
+  { id: "week4",   label: "Больше трёх недель", maxDays: 9999, light: "#15803D", dark: "#4ADE80" },
+];
+
+export function dueLevel(dueDate, completed) {
+  if (!dueDate || completed) return null;
+  const today = new Date(new Date().toDateString());
+  const due = new Date(dueDate);
+  const days = Math.round((due - today) / 86400000);
+  return DUE_LEVELS.find((l) => days <= l.maxDays) || DUE_LEVELS[DUE_LEVELS.length - 1];
+}
+
+export function dueColor(dueDate, completed, theme) {
+  const level = dueLevel(dueDate, completed);
+  if (!level) return null;
+  return theme.dark ? level.dark : level.light;
+}
 
 // Полупрозрачные заливки карточек. Значения намеренно с альфа-каналом:
 // карточка должна оставаться читаемой поверх любого фона доски и в

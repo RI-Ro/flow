@@ -206,6 +206,36 @@ export const api = {
 
   activity: (taskId) => get(`/tasks/${taskId}/activity`),
 
+  // --- дашборд
+  // Параметры собираются вызывающей стороной в готовую строку запроса:
+  // их набор растёт, и перечислять каждый отдельным аргументом значило
+  // бы править сигнатуру при каждом новом фильтре.
+  // --- календарь
+  calendar: (qs) => get(`/calendar${qs ? `?${qs}` : ""}`),
+
+  dashboard: (qs) => get(`/dashboard${qs ? `?${qs}` : ""}`),
+  dashboardUserTasks: (userId, qs) => get(`/dashboard/users/${userId}/tasks${qs ? `?${qs}` : ""}`),
+
+  // --- делегирование на время отсутствия
+  delegations: () => get("/delegations"),
+  // Действующие замещения всех сотрудников: нужны, чтобы в карточке
+  // человека было видно, что он в отпуске и к кому обращаться.
+  activeDelegations: () => get("/delegations/active"),
+  createDelegation: (payload) => post("/delegations", payload),
+  deleteDelegation: (id) => del(`/delegations/${id}`),
+
+  // --- связи между задачами
+  taskLinks: (taskId) => get(`/tasks/${taskId}/links`),
+  createTaskLink: (taskId, toTask, kind) => post(`/tasks/${taskId}/links`, { toTask, kind }),
+  deleteTaskLink: (id) => del(`/links/${id}`),
+
+  // --- шаблоны задач
+  templates: () => get("/templates"),
+  createTemplate: (payload) => post("/templates", payload),
+  deleteTemplate: (id) => del(`/templates/${id}`),
+  applyTemplate: (id, boardId, columnId) =>
+    post(`/templates/${id}/apply`, { boardId, columnId }),
+
   // --- администрирование учётных записей
   // Доступно только роли admin: сервер проверяет права запросом к базе
   // на каждый вызов и отвечает 404, если их нет.

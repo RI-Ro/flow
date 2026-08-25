@@ -6,7 +6,8 @@ import { Avatar, Modal, ModalHeader, Field, inputStyle } from "../lib/ui.jsx";
 const today = () => new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
 
 const emptyTask = (columnId) => ({
-  title: "", description: "", priority: "medium", color: "none",
+  title: "", description: "", priority: "normal", color: "none",
+  incomingNumber: "", incomingDate: "",
   columnId, dueDate: today(), assignees: [], tags: [],
 });
 
@@ -46,6 +47,11 @@ export default function TaskModal({ theme, directory, team, boardMemberIds, colu
   const submit = () => {
     if (!form.title.trim()) return setError("Укажите название задачи");
     if (!form.columnId) return setError("Выберите колонку");
+    // Приоритет «установлен срок» без даты теряет смысл — он именно про
+    // то, что дата назначена.
+    if (form.priority === "dated" && !form.dueDate) {
+      return setError("Для приоритета «Установлен срок» укажите срок исполнения");
+    }
     onSave({ ...form, title: form.title.trim(), tags: tagText.split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean) });
   };
 
@@ -65,6 +71,19 @@ export default function TaskModal({ theme, directory, team, boardMemberIds, colu
         <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={3}
           style={inputStyle(theme)} className="w-full rounded-lg px-3 py-2 text-[13px] outline-none resize-none" />
       </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Входящий №" theme={theme}>
+          <input value={form.incomingNumber || ""} onChange={(e) => set("incomingNumber", e.target.value)}
+            placeholder="например, 01-15/238" style={inputStyle(theme)}
+            className="w-full rounded-lg px-3 py-2 text-[13px] outline-none" />
+        </Field>
+        <Field label="Дата документа" theme={theme}>
+          <input type="date" value={String(form.incomingDate || "").slice(0, 10)}
+            onChange={(e) => set("incomingDate", e.target.value)} style={inputStyle(theme)}
+            className="w-full rounded-lg px-3 py-2 text-[13px] outline-none" />
+        </Field>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Приоритет" theme={theme}>
@@ -97,8 +116,17 @@ export default function TaskModal({ theme, directory, team, boardMemberIds, colu
             return (
               <button key={u.id} onClick={() => !u.deleted && toggleAssignee(u.id)} disabled={u.deleted}
                 style={{ background: active ? theme.accent : theme.surfaceAlt, color: active ? theme.accentText : theme.text, border: `1px solid ${theme.border}`, opacity: u.deleted ? 0.45 : 1 }}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[12px] font-medium">
-                <Avatar user={u} size={16} theme={theme} />{u.fullName.split(" ")[0]}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-medium max-w-full">
+                <Avatar user={u} size={16} theme={theme} />
+                {/* Полное имя, а не только первое слово: однофамильцы
+                    и просто похожие имена в списке из тридцати человек
+                    делают выбор по имени лотереей. */}
+                <span className="truncate max-w-[190px]">{u.fullName}</span>
+                {u.position && (
+                  <span style={{ opacity: 0.7 }} className="text-[10.5px] truncate max-w-[120px] hidden sm:inline">
+                    · {u.position}
+                  </span>
+                )}
                 {outsideMyTeam.has(u.id) && (
                   <span title="Назначен не из вашей команды"
                     style={{ background: active ? theme.accentText : theme.warning }}

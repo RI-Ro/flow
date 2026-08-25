@@ -19,11 +19,12 @@ function upsertById(list, item) {
   return next;
 }
 
-export default function TaskDetail({ theme, task, directory, currentUser, onClose, onEdit, onTaskPatched, onRequestDelete, onError, onOpenUser }) {
+export default function TaskDetail({ theme, task, directory, currentUser, onClose, onEdit, onTaskPatched, onRequestDelete, onError, onOpenUser, onOpenTask }) {
   const [tab, setTab] = useState("details");
   const [comments, setComments] = useState([]);
   const [files, setFiles] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const access = task.access;
@@ -50,6 +51,10 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
     confParticipants.length >= 2 ? conferenceLink(confParticipants, currentUser.id) : null;
   const confNames = conferenceNames(confParticipants, currentUser.id);
 
+  // Незавершённые задачи, блокирующие эту.
+  const blockedBy = links.filter(
+    (l) => l.kind === "blocks" && l.toTask === task.id && !l.completed);
+
   // Отметка исполнителя: доступна, только если текущий пользователь сам
   // в списке исполнителей. Автор задачи, не будучи исполнителем, кнопки
   // не увидит — за него отметиться нельзя.
@@ -74,12 +79,14 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([api.comments(task.id), api.attachments(task.id), api.activity(task.id)])
-      .then(([c, f, a]) => {
+    Promise.all([api.comments(task.id), api.attachments(task.id), api.activity(task.id),
+                 api.taskLinks(task.id)])
+      .then(([c, f, a, l]) => {
         if (!alive) return;
         setComments(c);
         setFiles(f);
         setActivity(a);
+        setLinks(l);
       })
       .catch((e) => onError(e.message))
       .finally(() => alive && setLoading(false));
@@ -220,6 +227,17 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
           </button>
         )}
 
+        {blockedBy.length > 0 && !completed && (
+          <div style={{ background: theme.surfaceAlt, border: `1px solid ${theme.danger}` }}
+            className="w-full mt-3 rounded-lg p-2.5 text-[12px] leading-snug"
+            role="status">
+            <span style={{ color: theme.danger }} className="font-semibold">Заблокирована. </span>
+            <span style={{ color: theme.text }}>
+              Нельзя завершить, пока не закрыты: {blockedBy.map((l) => `«${l.title}»`).join(", ")}.
+            </span>
+          </div>
+        )}
+
         {canEdit && (
           <button onClick={toggleComplete}
             style={{ background: completed ? theme.surfaceAlt : theme.success, color: completed ? theme.text : "#fff", border: `1px solid ${theme.border}` }}
@@ -231,7 +249,7 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
       </div>
 
       <nav style={{ borderColor: theme.border }} className="flex border-t border-b px-5 overflow-x-auto">
-        {[["details", "Детали"], ["comments", `Комментарии (${comments.length})`], ["files", `Файлы (${files.length})`], ["activity", "История"]].map(([key, label]) => (
+        {[["details", "Детали"], ["comments", `Комментарии (${comments.length})`], ["files", `Файлы (${files.length})`], ["links", `Связи (${links.length})`], ["activity", "История"]].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             style={{ color: tab === key ? theme.text : theme.textMuted, borderColor: tab === key ? theme.accent : "transparent" }}
             className="px-3 py-2.5 text-[12.5px] font-medium border-b-2 -mb-px whitespace-nowrap">
@@ -258,6 +276,11 @@ export default function TaskDetail({ theme, task, directory, currentUser, onClos
 
         {!loading && tab === "files" && (
           <FilesTab theme={theme} task={task} directory={directory} files={files} setFiles={setFiles} readOnly={readOnly} onError={onError} />
+        )}
+
+        {!loading && tab === "links" && (
+          <LinksTab theme={theme} task={task} links={links} setLinks={setLinks}
+            canEdit={canEdit} onError={onError} onOpenTask={onOpenTask} />
         )}
 
         {!loading && tab === "activity" && (
@@ -663,6 +686,178 @@ function FilesTab({ theme, task, directory, files, setFiles, readOnly, onError }
             <Upload size={14} /> {uploading ? "Загружаем…" : "Загрузить файл"}
           </button>
         </>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- связи */
+
+// У связи два конца, и читается она с них по-разному. Раньше подпись
+// бралась одна и та же в обе стороны — из-за этого и подзадача, и её
+// родитель показывались как «Подзадача», что бессмысленно.
+const LINK_KINDS = {
+  blocks: {
+    out: "Блокирует", in: "Заблокирована задачей",
+    hint: "пока блокирующая задача не завершена, эту закрыть нельзя",
+  },
+  relates: {
+    out: "Связана с", in: "Связана с",
+    hint: "задачи касаются одного вопроса",
+  },
+  subtask: {
+    // Направление: from — родитель, to — часть работы.
+    out: "Подзадача", in: "Родительская задача",
+    hint: "часть более крупной работы",
+  },
+};
+
+function LinksTab({ theme, task, links, setLinks, canEdit, onError, onOpenTask }) {
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState("relates");
+  const [found, setFound] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  // Поиск задач для связывания идёт по уже загруженной доске, а не
+  // отдельным запросом: связывают почти всегда внутри одного проекта,
+  // а серверный поиск по всем доступным задачам — отдельная работа.
+  useEffect(() => {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) { setFound([]); return; }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const all = await api.tasks(task.boardId);
+        setFound(all
+          .filter((t) => t.id !== task.id && t.title.toLowerCase().includes(q))
+          .filter((t) => !links.some((l) => l.toTask === t.id || l.fromTask === t.id))
+          .slice(0, 6));
+      } catch (e) {
+        onError(e.message);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, task.id, task.boardId, links, onError]);
+
+  const add = async (toTask) => {
+    try {
+      const created = await api.createTaskLink(task.id, toTask, kind);
+      setLinks((prev) => [...prev, created]);
+      setAdding(false);
+      setQuery("");
+    } catch (e) {
+      onError(e.message);
+    }
+  };
+
+  const remove = async (id) => {
+    try {
+      await api.deleteTaskLink(id);
+      setLinks((prev) => prev.filter((l) => l.id !== id));
+    } catch (e) {
+      onError(e.message);
+    }
+  };
+
+  return (
+    <div>
+      {links.map((l) => {
+        // Направление важно: «блокирует» и «заблокирована» — это одна
+        // строка, прочитанная с разных концов.
+        const outgoing = l.fromTask === task.id;
+        const info = LINK_KINDS[l.kind] || LINK_KINDS.relates;
+        const label = outgoing ? info.out : info.in;
+        // Незакрытая блокирующая задача — причина, по которой эту
+        // нельзя завершить. Показываем это явно, а не оставляем
+        // человека гадать над отказом сервера.
+        const blocking = l.kind === "blocks" && !outgoing && !l.completed;
+        return (
+          <div key={l.id} style={{ background: theme.surfaceAlt, border: `1px solid ${theme.border}` }}
+            className="rounded-xl p-2.5 mb-1.5 flex items-center gap-2 group">
+            <span className="mono text-[9.5px] uppercase px-1.5 py-0.5 rounded shrink-0"
+              style={{
+                background: blocking ? theme.danger : theme.surface,
+                color: blocking ? "#fff" : theme.textMuted,
+              }}
+              title={info.hint}>
+              {label}
+            </span>
+            <button onClick={() => onOpenTask && onOpenTask(l.toTask === task.id ? l.fromTask : l.toTask)}
+              className="flex-1 min-w-0 text-left">
+              <span style={{
+                color: theme.text,
+                textDecoration: l.completed ? "line-through" : "none",
+                opacity: l.completed ? 0.65 : 1,
+              }} className="text-[12.5px] truncate block">
+                {l.title}
+              </span>
+            </button>
+            {canEdit && (
+              <button onClick={() => remove(l.id)} style={{ color: theme.danger }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {links.length === 0 && (
+        <p style={{ color: theme.textMuted }} className="text-[13px] mb-3">Связей нет.</p>
+      )}
+
+      {canEdit && !adding && (
+        <button onClick={() => setAdding(true)}
+          style={{ color: theme.accent, border: `1px dashed ${theme.border}` }}
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-[12.5px] font-medium mt-2">
+          <Plus size={14} /> Связать с задачей
+        </button>
+      )}
+
+      {adding && (
+        <div style={{ background: theme.surfaceAlt, border: `1px solid ${theme.border}` }}
+          className="rounded-xl p-2.5 mt-2">
+          <div className="flex gap-1.5 mb-2">
+            {Object.entries(LINK_KINDS).map(([k, v]) => (
+              <button key={k} onClick={() => setKind(k)} title={v.hint}
+                style={{
+                  background: kind === k ? theme.accent : theme.surface,
+                  color: kind === k ? theme.accentText : theme.text,
+                  border: `1px solid ${theme.border}`,
+                }}
+                className="flex-1 rounded-lg py-1.5 text-[11.5px] font-medium">
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} autoFocus
+            placeholder="Название задачи (от двух символов)" style={inputStyle(theme)}
+            className="w-full rounded-lg px-2.5 py-1.5 text-[12.5px] outline-none mb-1.5" />
+
+          {searching && (
+            <p style={{ color: theme.textMuted }} className="text-[12px] py-1">Ищем…</p>
+          )}
+          {found.map((t) => (
+            <button key={t.id} onClick={() => add(t.id)}
+              style={{ color: theme.text }}
+              className="w-full text-left px-2 py-1.5 rounded-lg text-[12.5px] truncate hover:opacity-80">
+              {t.title}
+            </button>
+          ))}
+          {!searching && query.trim().length >= 2 && found.length === 0 && (
+            <p style={{ color: theme.textMuted }} className="text-[12px] py-1">
+              Ничего не найдено в этом проекте.
+            </p>
+          )}
+
+          <button onClick={() => { setAdding(false); setQuery(""); }}
+            style={{ color: theme.textMuted }} className="text-[12px] mt-1.5">
+            Отмена
+          </button>
+        </div>
       )}
     </div>
   );

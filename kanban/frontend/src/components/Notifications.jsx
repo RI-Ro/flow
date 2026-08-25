@@ -78,7 +78,17 @@ export default function Notifications({ theme, onCountChange, onOpenTask }) {
         ))}
         {!loading && items.length === 0 && (
           <p style={{ color: theme.textMuted }} className="text-[12.5px] text-center py-6 px-3 leading-relaxed">
-            {includeRead ? "Уведомлений нет." : "Непрочитанных нет. Включите показ прочитанных, чтобы увидеть остальные."}
+            {includeRead ? (
+              "Уведомлений нет."
+            ) : (
+              <>
+                Непрочитанных нет.
+                <button onClick={() => { setPage(1); setIncludeRead(true); }}
+                  style={{ color: theme.accent }} className="block mx-auto mt-1.5 font-medium">
+                  Показать прочитанные
+                </button>
+              </>
+            )}
           </p>
         )}
       </div>

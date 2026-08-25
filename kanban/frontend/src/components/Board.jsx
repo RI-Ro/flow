@@ -3,19 +3,27 @@ import {
   Plus, MessageSquare, Paperclip, Calendar, AlertTriangle, ListChecks,
   Settings, Share2, Check, Users,
 } from "lucide-react";
-import { PRIORITIES, fmtDate, isOverdue, plural, resolveUser, taskColorFill } from "../lib/theme.js";
+import { PRIORITIES, fmtDate, isOverdue, plural, resolveUser, taskColorFill, dueColor, dueLevel } from "../lib/theme.js";
 import { Avatar } from "../lib/ui.jsx";
 
-export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, onDragStart, onDragEnd, onHover, sourceLabel, showAuthor }) {
+export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, onDragStart, onDragEnd, onHover, sourceLabel, highlight, currentUserId, onOpenUser }) {
   const assignees = task.assignees.map((id) => resolveUser(directory, id));
   const hasDeleted = assignees.some((u) => u.deleted);
   const completed = Boolean(task.completedAt);
   const overdue = isOverdue(task.dueDate, completed);
   const pr = PRIORITIES[task.priority] || PRIORITIES.medium;
   const stepsDone = task.steps.filter((s) => s.done).length;
-  const author = showAuthor ? resolveUser(directory, task.createdBy) : null;
+  // Автор показывается на любой чужой задаче, а не только во
+  // «Входящих»: по карточке в общем проекте так же нужно понимать, к
+  // кому идти с вопросом. Нажатие открывает карточку человека —
+  // с почтой, видеозвонком и сведениями о замещении.
+  const author = task.createdBy && task.createdBy !== currentUserId
+    ? resolveUser(directory, task.createdBy)
+    : null;
   const fill = taskColorFill(task.color, theme);
   const doneIds = task.assigneesDone || [];
+  const dueTint = dueColor(task.dueDate, completed, theme);
+  const dueInfo = dueLevel(task.dueDate, completed);
 
   const handleDragOver = (e) => {
     if (!draggable) return;
@@ -46,6 +54,18 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
           ? `linear-gradient(${fill}, ${fill}), ${theme.surface}`
           : theme.surface,
         border: `1px solid ${fill ? "transparent" : theme.border}`,
+        // Подсветка изменения: полоса слева и мягкая тень того же
+        // цвета. Мигание на доске из полусотни карточек превращается
+        // в гирлянду, и его перестают замечать вместе с важным —
+        // спокойный акцент, гаснущий сам, заметен ровно настолько,
+        // насколько нужно.
+        // Полоса ровно 3px слева плюс мягкая тень того же цвета.
+        // Полоса даёт заметность при беглом взгляде на доску, тень —
+        // ощущение «карточка тронута», не отвлекая миганием.
+        boxShadow: highlight
+          ? `inset 3px 0 0 0 ${highlight.color}, 0 0 16px -4px ${highlight.color}`
+          : fill ? `inset 0 0 0 1px ${theme.border}` : undefined,
+        transition: "box-shadow .45s ease",
         boxShadow: fill ? `inset 0 0 0 1px ${theme.border}` : undefined,
         opacity: dragging === task.id ? 0.35 : completed ? 0.75 : 1,
       }}
@@ -69,13 +89,24 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
         {task.title}
       </h4>
 
+      {task.incomingNumber && (
+        <div style={{ color: theme.textMuted }} className="text-[10.5px] mb-1.5"
+          title="Реквизиты входящего документа">
+          вх. № {task.incomingNumber}
+          {task.incomingDate ? ` от ${fmtDate(task.incomingDate)}` : ""}
+        </div>
+      )}
+
       {author && (
-        <div className="flex items-center gap-1.5 mb-2">
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpenUser && onOpenUser(author); }}
+          className="flex items-center gap-1.5 mb-2 max-w-full hover:opacity-75"
+          title={`Поставил(а): ${author.fullName}. Нажмите, чтобы связаться`}>
           <Avatar user={author} size={16} theme={theme} />
           <span style={{ color: theme.textMuted }} className="text-[11px] truncate">
-            Поставил{author.fullName?.endsWith("а") ? "а" : ""}: {author.fullName}
+            {author.fullName}
           </span>
-        </div>
+        </button>
       )}
 
       {task.tags?.length > 0 && (
@@ -137,7 +168,8 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
           {task.commentCount > 0 && <span className="flex items-center gap-0.5"><MessageSquare size={12} />{task.commentCount}</span>}
           {task.attachmentCount > 0 && <span className="flex items-center gap-0.5"><Paperclip size={12} />{task.attachmentCount}</span>}
           {task.dueDate && (
-            <span style={{ color: overdue ? theme.danger : theme.textMuted }} className="flex items-center gap-0.5 font-medium">
+            <span style={{ color: dueTint || theme.textMuted }}
+              title={dueInfo ? `Срок — ${dueInfo.label.toLowerCase()}` : "Срок исполнения"} className="flex items-center gap-0.5 font-medium">
               <Calendar size={12} />{fmtDate(task.dueDate)}
             </span>
           )}
@@ -147,7 +179,7 @@ export function TaskCard({ task, theme, directory, onOpen, draggable, dragging, 
   );
 }
 
-export function Column({ column, tasks, theme, directory, canEdit, dragging, dropTarget, onOpen, onDragStart, onDragEnd, onHover, onDrop, onQuickAdd, onSettings }) {
+export function Column({ column, tasks, theme, directory, canEdit, dragging, dropTarget, onOpen, onDragStart, onDragEnd, onHover, onDrop, onQuickAdd, onSettings, onExpandColumn, highlights, currentUserId, onOpenUser }) {
   const count = tasks.length;
   const overLimit = column.wipLimit > 0 && count > column.wipLimit;
   const load = column.wipLimit > 0 ? Math.min(1, count / column.wipLimit) : 0;
@@ -167,13 +199,21 @@ export function Column({ column, tasks, theme, directory, canEdit, dragging, dro
       onDragOver={handleDragOver}
       onDrop={(e) => { e.preventDefault(); onDrop(column.id); }}
       style={{ background: theme.surfaceAlt, border: `1px solid ${isTarget && dragging ? theme.accent : theme.border}` }}
-      className="rounded-2xl flex flex-col w-[232px] shrink-0 max-h-full transition-colors"
+      className="rounded-2xl flex flex-col w-[18.5vw] min-w-[232px] max-w-[330px] shrink-0 max-h-full transition-colors"
     >
       <header className="px-3 pt-3 pb-2">
         <div className="flex items-center justify-between gap-2 mb-1.5">
           <div className="flex items-center gap-2 min-w-0">
             <span style={{ background: column.color }} className="w-2 h-2 rounded-full shrink-0" />
-            <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[12.5px] truncate">{column.title}</h3>
+            {/* Нажатие на название разворачивает колонку списком на
+                весь экран: на доске карточка ужата до пары строк, а при
+                разборе нужен полный вид с сортировкой. */}
+            <button onClick={() => onExpandColumn && onExpandColumn(column)}
+              style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }}
+              className="font-semibold text-[12.5px] truncate text-left hover:opacity-75"
+              title="Открыть колонку списком">
+              {column.title}
+            </button>
             {column.isDone && <Check size={12} style={{ color: theme.success }} title="Колонка завершения" />}
           </div>
           {canEdit && <button onClick={onSettings} style={{ color: theme.textMuted }} title="Настроить колонки"><Settings size={13} /></button>}
@@ -200,7 +240,8 @@ export function Column({ column, tasks, theme, directory, canEdit, dragging, dro
         {tasks.map((t, i) => (
           <React.Fragment key={t.id}>
             <TaskCard task={t} theme={theme} directory={directory} onOpen={onOpen} draggable={canEdit}
-              dragging={dragging} onDragStart={onDragStart} onDragEnd={onDragEnd} onHover={onHover} />
+              dragging={dragging} onDragStart={onDragStart} onDragEnd={onDragEnd} onHover={onHover}
+              highlight={highlights?.[t.id]} currentUserId={currentUserId} onOpenUser={onOpenUser} />
             {insertionLine(i + 1)}
           </React.Fragment>
         ))}
@@ -222,7 +263,7 @@ export function Column({ column, tasks, theme, directory, canEdit, dragging, dro
   );
 }
 
-export function BoardView({ columns, tasks, theme, directory, canEdit, canManage, hideCompleted, onOpenTask, onMove, onQuickAdd, onSettings, onShowCompleted }) {
+export function BoardView({ columns, tasks, theme, directory, canEdit, canManage, hideCompleted, onOpenTask, onMove, onQuickAdd, onSettings, onShowCompleted, onExpandColumn, highlights, currentUserId, onOpenUser }) {
   const [dragging, setDragging] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const target = useRef(null);
@@ -259,16 +300,20 @@ export function BoardView({ columns, tasks, theme, directory, canEdit, canManage
 
       <div className="flex gap-3 h-full items-start pb-2">
         {visibleColumns.map((col) => (
+          // Порядок задаётся выше по дереву (App.jsx) и уже применён к
+          // списку. Повторная сортировка по position здесь отменяла
+          // выбранный режим — карточки возвращались к порядку доски.
           <Column key={col.id} column={col}
-            tasks={tasks.filter((t) => t.columnId === col.id).sort((a, b) => a.position - b.position)}
+            tasks={tasks.filter((t) => t.columnId === col.id)}
             theme={theme} directory={directory} canEdit={canEdit} dragging={dragging} dropTarget={dropTarget}
             onOpen={onOpenTask} onDragStart={setDragging} onDragEnd={finish} onHover={hover} onDrop={drop}
-            onQuickAdd={onQuickAdd} onSettings={onSettings} />
+            onQuickAdd={onQuickAdd} onSettings={onSettings} onExpandColumn={onExpandColumn}
+            highlights={highlights} currentUserId={currentUserId} onOpenUser={onOpenUser} />
         ))}
 
         {canManage && (
           <button onClick={onSettings} style={{ border: `1px dashed ${theme.border}`, color: theme.textMuted, background: theme.surfaceAlt }}
-            className="w-[232px] shrink-0 rounded-2xl py-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium">
+            className="w-[18.5vw] min-w-[232px] max-w-[330px] shrink-0 rounded-2xl py-4 flex items-center justify-center gap-1.5 text-[12.5px] font-medium">
             <Plus size={14} /> Добавить колонку
           </button>
         )}
@@ -277,7 +322,7 @@ export function BoardView({ columns, tasks, theme, directory, canEdit, canManage
   );
 }
 
-export function InboxView({ tasks, theme, directory, onOpenTask }) {
+export function InboxView({ tasks, theme, directory, onOpenTask, highlights, currentUserId, onOpenUser }) {
   const groups = Object.entries(
     tasks.reduce((acc, t) => {
       (acc[t.boardTitle || "Без проекта"] ||= []).push(t);
@@ -289,7 +334,7 @@ export function InboxView({ tasks, theme, directory, onOpenTask }) {
     return (
       <div className="max-w-md mx-auto text-center py-16">
         <Users size={30} style={{ color: theme.textMuted }} className="mx-auto mb-3" />
-        <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[16px] mb-1.5">Входящих задач нет</h3>
+        <h3 style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }} className="font-semibold text-[16px] mb-1.5">Входящих задач нет</h3>
         <p style={{ color: theme.textMuted }} className="text-[13px] leading-relaxed">
           Сюда попадают задачи из чужих проектов, к которым вам открыли доступ точечно, — без доступа к остальной доске.
         </p>
@@ -307,14 +352,15 @@ export function InboxView({ tasks, theme, directory, onOpenTask }) {
         {groups.map(([title, list]) => (
           <section key={title} style={{ background: theme.surfaceAlt, border: `1px solid ${theme.border}` }} className="rounded-2xl w-[300px] shrink-0 flex flex-col max-h-full">
             <header className="px-3 pt-3 pb-2 flex items-center justify-between">
-              <h3 style={{ color: theme.text, fontFamily: "Space Grotesk, sans-serif" }} className="font-semibold text-[12.5px] truncate">{title}</h3>
+              <h3 style={{ color: theme.text, fontFamily: "Manrope, sans-serif" }} className="font-semibold text-[12.5px] truncate">{title}</h3>
               <span style={{ color: theme.textMuted }} className="text-[11.5px]">{plural(list.length, "задача", "задачи", "задач")}</span>
             </header>
             <div className="px-2 pb-2 overflow-y-auto">
               {list.map((t) => (
                 <TaskCard key={t.id} task={t} theme={theme} directory={directory} onOpen={onOpenTask}
                   draggable={false} dragging={null} onDragStart={() => {}} onDragEnd={() => {}} onHover={() => {}}
-                  sourceLabel={t.access === "read" ? "просмотр" : "участие"} showAuthor />
+                  sourceLabel={t.access === "read" ? "просмотр" : "участие"} showAuthor
+                  highlight={highlights?.[t.id]} currentUserId={currentUserId} onOpenUser={onOpenUser} />
               ))}
             </div>
           </section>
