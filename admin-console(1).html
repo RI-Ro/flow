@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Администрирование СЭД</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.6/babel.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1216; --surface:#161b22; --surface2:#1c232c; --border:#2a323d;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#3b82f6; --accent2:#22a06b;
+    --danger:#e5484d; --warning:#f0a132; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,Cantarell,sans-serif}
+  input,select,button,textarea{font:inherit;color:inherit}
+  input,select{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;width:100%}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  .btn{background:var(--accent);border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;color:#fff}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text);font-weight:500}
+  .btn.ghost:hover{background:var(--surface2)}
+  .btn.danger{background:var(--danger)}
+  .btn.small{padding:4px 8px;font-size:12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:8px;align-items:center}
+  .chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)}
+  .dz-over{outline:2px dashed var(--accent);outline-offset:-2px;background:rgba(59,130,246,.08)}
+  .node{border-radius:8px}
+  .node-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;cursor:grab}
+  .node-head:hover{background:var(--surface2)}
+  .node-head.sel{background:rgba(59,130,246,.15);outline:1px solid var(--accent)}
+  .user-row{display:flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;cursor:grab;font-size:13px}
+  .user-row:hover{background:var(--surface2)}
+  .user-row.inactive{opacity:.5}
+  .caret{width:16px;text-align:center;color:var(--muted);cursor:pointer;user-select:none}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);padding:10px 16px;border-radius:8px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .toast.err{background:var(--danger);color:#fff}
+  .toast.ok{background:var(--accent2);color:#fff}
+  a{color:var(--accent)}
+  .scroll{overflow:auto}
+  .split{display:grid;grid-template-columns:minmax(360px,1.4fr) 1fr;gap:14px}
+  @media(max-width:900px){.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+const LS_TOKEN = 'sed_admin_token';
+const LS_API = 'sed_admin_api';
+const ALL_ROLES = ['author','approver_hierarchy','approver_cross_dept','signer','executor','clerk','duty_officer','chief','controller','admin'];
+// Человекочитаемые названия ролей (рус.) — чтобы админу было однозначно понятно.
+const ROLE_LABELS = {
+  author: 'Автор (создаёт документы)',
+  approver_hierarchy: 'Согласующий по иерархии',
+  approver_cross_dept: 'Согласующий межведомственный',
+  signer: 'Подписант (право подписи)',
+  executor: 'Исполнитель поручений',
+  clerk: 'Канцелярия (приём/рассылка)',
+  duty_officer: 'Дежурный (приём/рассылка)',
+  chief: 'Руководитель подразделения',
+  controller: 'Контролёр (контроль исполнения)',
+  admin: 'Администратор системы',
+};
+
+function useApi() {
+  const [api, setApi] = useState(() => localStorage.getItem(LS_API) || (location.origin.startsWith('http') ? location.origin : 'http://localhost:8080'));
+  const [token, setToken] = useState(() => localStorage.getItem(LS_TOKEN) || '');
+  useEffect(() => { localStorage.setItem(LS_API, api); }, [api]);
+  useEffect(() => { token ? localStorage.setItem(LS_TOKEN, token) : localStorage.removeItem(LS_TOKEN); }, [token]);
+
+  const request = useCallback(async (path, opts = {}) => {
+    const res = await fetch(api.replace(/\/$/, '') + path, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: 'Bearer ' + token } : {}),
+        ...(opts.headers || {}),
+      },
+    });
+    if (res.status === 204) return null;
+    let body = null;
+    try { body = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error((body && body.error) || ('Ошибка ' + res.status));
+    return body;
+  }, [api, token]);
+
+  return { api, setApi, token, setToken, request };
+}
+
+function Toast({ toast }) {
+  if (!toast) return null;
+  return <div className={'toast ' + (toast.type === 'err' ? 'err' : 'ok')}>{toast.msg}</div>;
+}
+
+// ------------------------- Login -------------------------
+function Login({ apiHook }) {
+  const { api, setApi, setToken, request } = apiHook;
+  const [login, setLogin] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const res = await fetch(api.replace(/\/$/, '') + '/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || ('Ошибка ' + res.status));
+      if (!body.token) throw new Error('Сервер не вернул токен');
+      setToken(body.token);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ maxWidth: 380, margin: '10vh auto' }}>
+      <div className="card" style={{ padding: 24 }}>
+        <h1 style={{ margin: '0 0 4px', fontSize: 20 }}>Администрирование СЭД</h1>
+        <div className="muted" style={{ marginBottom: 16 }}>Оргструктура и пользователи</div>
+        <label>API сервера</label>
+        <input value={api} onChange={e => setApi(e.target.value)} placeholder="http://localhost:8080" />
+        <label>Логин</label>
+        <input value={login} onChange={e => setLogin(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
+        <label>Пароль</label>
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
+        {err && <div style={{ color: 'var(--danger)', marginTop: 10, fontSize: 13 }}>{err}</div>}
+        <button className="btn" style={{ width: '100%', marginTop: 16 }} onClick={submit} disabled={busy}>
+          {busy ? 'Вход…' : 'Войти'}
+        </button>
+        <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+          Требуются права администратора. Если открываете файл не с того же адреса, что сервер — добавьте адрес этой страницы в <code>ALLOWED_ORIGINS</code>.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------- Tree helpers -------------------------
+function buildTree(depts) {
+  const byId = {}; const roots = [];
+  depts.forEach(d => { byId[d.id] = { ...d, children: [] }; });
+  depts.forEach(d => {
+    if (d.parent_id && byId[d.parent_id]) byId[d.parent_id].children.push(byId[d.id]);
+    else roots.push(byId[d.id]);
+  });
+  const sortRec = (n) => { n.children.sort((a, b) => a.name.localeCompare(b.name)); n.children.forEach(sortRec); };
+  roots.sort((a, b) => a.name.localeCompare(b.name)); roots.forEach(sortRec);
+  return roots;
+}
+
+// ------------------------- Department node -------------------------
+function DeptNode({ node, depth, usersByDept, sel, onSelect, onDrop, expanded, toggle, dragOverId, setDragOverId }) {
+  const isOver = dragOverId === 'dept:' + node.id;
+  const users = usersByDept[node.id] || [];
+  const isExpanded = expanded[node.id] !== false; // default open
+
+  const onDragStart = (e) => {
+    e.stopPropagation();
+    e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'dept', id: node.id }));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragOverId('dept:' + node.id); };
+  const onDragLeave = (e) => { e.stopPropagation(); setDragOverId(cur => cur === 'dept:' + node.id ? null : cur); };
+  const onDropHandler = (e) => {
+    e.preventDefault(); e.stopPropagation(); setDragOverId(null);
+    let payload; try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
+    onDrop(payload, node.id);
+  };
+
+  return (
+    <div className="node" style={{ marginLeft: depth ? 14 : 0 }}>
+      <div
+        className={'node-head' + (sel && sel.type === 'dept' && sel.id === node.id ? ' sel' : '') + (isOver ? ' dz-over' : '')}
+        draggable onDragStart={onDragStart} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDropHandler}
+        onClick={() => onSelect({ type: 'dept', id: node.id })}
+      >
+        <span className="caret" onClick={(e) => { e.stopPropagation(); toggle(node.id); }}>
+          {(node.children.length || users.length) ? (isExpanded ? '▾' : '▸') : '·'}
+        </span>
+        <span style={{ fontWeight: 600 }}>{node.name}</span>
+        {node.numbering_prefix && <span className="chip" title="numbering_prefix">{node.numbering_prefix}</span>}
+        <span className="chip" title="outgoing_prefix">{node.outgoing_prefix}</span>
+        {!node.is_active && <span className="chip" style={{ color: 'var(--warning)' }}>неактивно</span>}
+        {users.length > 0 && <span className="muted" style={{ fontSize: 12 }}>· {users.length}</span>}
+      </div>
+
+      {isExpanded && (
+        <div>
+          {users.map(u => (
+            <UserRow key={u.id} user={u} depth={depth + 1} sel={sel} onSelect={onSelect} />
+          ))}
+          {node.children.map(ch => (
+            <DeptNode key={ch.id} node={ch} depth={depth + 1} usersByDept={usersByDept}
+              sel={sel} onSelect={onSelect} onDrop={onDrop} expanded={expanded} toggle={toggle}
+              dragOverId={dragOverId} setDragOverId={setDragOverId} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserRow({ user, depth, sel, onSelect }) {
+  const onDragStart = (e) => {
+    e.stopPropagation();
+    e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'user', id: user.id }));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const isSel = sel && sel.type === 'user' && sel.id === user.id;
+  return (
+    <div className={'user-row' + (user.is_active ? '' : ' inactive')} style={{ marginLeft: 14 + depth * 6, background: isSel ? 'rgba(59,130,246,.15)' : undefined }}
+      draggable onDragStart={onDragStart} onClick={() => onSelect({ type: 'user', id: user.id })}>
+      <span style={{ opacity: .6 }}>👤</span>
+      <span>{user.full_name}</span>
+      {user.position && <span className="muted">· {user.position}</span>}
+      {user.roles && user.roles.includes('admin') && <span className="chip" style={{ color: 'var(--accent)' }}>admin</span>}
+    </div>
+  );
+}
+
+// ------------------------- Editors -------------------------
+function DeptEditor({ dept, onSave, onDelete, onCreateChild }) {
+  const [f, setF] = useState({ name: '', outgoing_prefix: '', numbering_prefix: '', is_active: true });
+  useEffect(() => { if (dept) setF({ name: dept.name, outgoing_prefix: dept.outgoing_prefix, numbering_prefix: dept.numbering_prefix || '', is_active: dept.is_active }); }, [dept]);
+  if (!dept) return null;
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0 }}>Подразделение #{dept.id}</h3>
+        <span className="muted" style={{ fontSize: 12 }}>пользователей: {dept.user_count}</span>
+      </div>
+      <label>Название</label>
+      <input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
+      <label>Префикс (outgoing_prefix) — код после «/» и уникальный</label>
+      <input value={f.outgoing_prefix} onChange={e => setF({ ...f, outgoing_prefix: e.target.value })} />
+      <label>Иерархический префикс нумерации (numbering_prefix), напр. 1/2/3/44</label>
+      <input value={f.numbering_prefix} onChange={e => setF({ ...f, numbering_prefix: e.target.value })} />
+      <label className="row" style={{ marginTop: 10 }}>
+        <input type="checkbox" style={{ width: 'auto' }} checked={f.is_active} onChange={e => setF({ ...f, is_active: e.target.checked })} />
+        <span style={{ marginLeft: 8 }}>Активно</span>
+      </label>
+      <div className="row" style={{ marginTop: 16, gap: 8 }}>
+        <button className="btn" onClick={() => onSave(dept.id, f)}>Сохранить</button>
+        <button className="btn ghost" onClick={() => onCreateChild(dept.id)}>+ Подразделение внутрь</button>
+        <button className="btn danger" style={{ marginLeft: 'auto' }} onClick={() => onDelete(dept.id)}>Удалить</button>
+      </div>
+    </div>
+  );
+}
+
+function DeptMulti({ label, hint, depts, selected, onChange }) {
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
+  return (
+    <div style={{ marginTop: 10 }}>
+      <label>{label}</label>
+      {hint && <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{hint}</div>}
+      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+        {depts.map(d => (
+          <label key={d.id} className="chip" style={{ cursor: 'pointer', color: selected.includes(d.id) ? 'var(--accent)' : 'var(--muted)' }}>
+            <input type="checkbox" style={{ width: 'auto', marginRight: 4 }} checked={selected.includes(d.id)} onChange={() => toggle(d.id)} />
+            {d.name}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UserEditor({ user, depts, onSave, onMove, onPassword, onRoles, onDepartments }) {
+  const [f, setF] = useState({ login: '', full_name: '', position: '', department_id: 0, numbering_department_id: 0, is_active: true });
+  const [pwd, setPwd] = useState('');
+  const [roles, setRoles] = useState([]);
+  const [vis, setVis] = useState([]);
+  const [acq, setAcq] = useState([]);
+  const [asg, setAsg] = useState([]);
+  useEffect(() => {
+    if (user) {
+      setF({ login: user.login, full_name: user.full_name, position: user.position || '',
+             department_id: user.department_id || 0, numbering_department_id: user.numbering_department_id || 0,
+             is_active: user.is_active });
+      setRoles(user.roles || []);
+      setVis(user.visible_departments || []);
+      setAcq(user.acquaint_departments || []);
+      setAsg(user.assign_departments || []);
+      setPwd('');
+    }
+  }, [user]);
+  if (!user) return null;
+  const toggleRole = (r) => setRoles(rs => rs.includes(r) ? rs.filter(x => x !== r) : [...rs, r]);
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <h3 style={{ margin: 0 }}>Пользователь #{user.id}</h3>
+      <label>ФИО</label>
+      <input value={f.full_name} onChange={e => setF({ ...f, full_name: e.target.value })} />
+      <label>Должность (для штампа подписи)</label>
+      <input value={f.position} onChange={e => setF({ ...f, position: e.target.value })} />
+      <label>Логин</label>
+      <input value={f.login} onChange={e => setF({ ...f, login: e.target.value })} />
+      <label>Основное подразделение</label>
+      <select value={f.department_id} onChange={e => setF({ ...f, department_id: Number(e.target.value) })}>
+        <option value={0}>— не задано —</option>
+        {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+      </select>
+      <label>Подразделение для нумерации (по умолчанию — как основное)</label>
+      <select value={f.numbering_department_id} onChange={e => setF({ ...f, numbering_department_id: Number(e.target.value) })}>
+        <option value={0}>— как основное —</option>
+        {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+      </select>
+      <label className="row" style={{ marginTop: 10 }}>
+        <input type="checkbox" style={{ width: 'auto' }} checked={f.is_active} onChange={e => setF({ ...f, is_active: e.target.checked })} />
+        <span style={{ marginLeft: 8 }}>Активен</span>
+      </label>
+      <div className="row" style={{ marginTop: 14 }}>
+        <button className="btn" onClick={() => onSave(user.id, f)}>Сохранить</button>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Роли (глобально/по подразделению) — сохраняются для выбранного выше подразделения; admin — глобально.</div>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+        {ALL_ROLES.map(r => (
+          <label key={r} className="chip" style={{ cursor: 'pointer', color: roles.includes(r) ? 'var(--accent)' : 'var(--muted)' }} title={r}>
+            <input type="checkbox" style={{ width: 'auto', marginRight: 4 }} checked={roles.includes(r)} onChange={() => toggleRole(r)} />
+            {ROLE_LABELS[r] || r}
+          </label>
+        ))}
+      </div>
+      <button className="btn ghost small" style={{ marginTop: 10 }}
+        onClick={() => onRoles(user.id, roles.includes('admin') ? 0 : (f.department_id || 0), roles)}>Сохранить роли</button>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+      <div className="muted" style={{ fontSize: 12 }}>Дополнительные подразделения (расширяют права вне основной иерархии).</div>
+      <DeptMulti label="Видимость исходящих" hint="видит подписанные исходящие этих подразделений" depts={depts} selected={vis} onChange={setVis} />
+      <DeptMulti label="Ознакомление" hint="может знакомить сотрудников этих подразделений (и ниже)" depts={depts} selected={acq} onChange={setAcq} />
+      <DeptMulti label="Поручения" hint="может давать поручения сотрудникам этих подразделений (и ниже)" depts={depts} selected={asg} onChange={setAsg} />
+      <button className="btn ghost small" style={{ marginTop: 10 }}
+        onClick={() => onDepartments(user.id, { visible_departments: vis, acquaint_departments: acq, assign_departments: asg })}>
+        Сохранить доп. подразделения
+      </button>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+      <label>Новый пароль</label>
+      <div className="row">
+        <input type="text" value={pwd} onChange={e => setPwd(e.target.value)} placeholder="оставьте пустым, чтобы не менять" />
+        <button className="btn ghost" disabled={!pwd} onClick={() => { onPassword(user.id, pwd); setPwd(''); }}>Задать</button>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------- Create panels -------------------------
+function CreateDeptForm({ parentId, depts, onCreate, onCancel }) {
+  const [f, setF] = useState({ name: '', outgoing_prefix: '', numbering_prefix: '', parent_id: parentId || 0 });
+  useEffect(() => setF(v => ({ ...v, parent_id: parentId || 0 })), [parentId]);
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <h3 style={{ margin: '0 0 6px' }}>Новое подразделение</h3>
+      <label>Название</label>
+      <input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
+      <label>Префикс (outgoing_prefix)</label>
+      <input value={f.outgoing_prefix} onChange={e => setF({ ...f, outgoing_prefix: e.target.value })} />
+      <label>numbering_prefix (необязательно)</label>
+      <input value={f.numbering_prefix} onChange={e => setF({ ...f, numbering_prefix: e.target.value })} />
+      <label>Родитель</label>
+      <select value={f.parent_id} onChange={e => setF({ ...f, parent_id: Number(e.target.value) })}>
+        <option value={0}>— корень —</option>
+        {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+      </select>
+      <div className="row" style={{ marginTop: 14 }}>
+        <button className="btn" onClick={() => onCreate(f)}>Создать</button>
+        <button className="btn ghost" onClick={onCancel}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+function CreateUserForm({ depts, onCreate, onCancel }) {
+  const [f, setF] = useState({ login: '', password: '', full_name: '', position: '', department_id: 0 });
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <h3 style={{ margin: '0 0 6px' }}>Новый пользователь</h3>
+      <label>ФИО</label>
+      <input value={f.full_name} onChange={e => setF({ ...f, full_name: e.target.value })} />
+      <label>Должность</label>
+      <input value={f.position} onChange={e => setF({ ...f, position: e.target.value })} />
+      <label>Логин</label>
+      <input value={f.login} onChange={e => setF({ ...f, login: e.target.value })} />
+      <label>Пароль</label>
+      <input type="text" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} />
+      <label>Подразделение</label>
+      <select value={f.department_id} onChange={e => setF({ ...f, department_id: Number(e.target.value) })}>
+        <option value={0}>— не задано —</option>
+        {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+      </select>
+      <div className="row" style={{ marginTop: 14 }}>
+        <button className="btn" onClick={() => onCreate(f)}>Создать</button>
+        <button className="btn ghost" onClick={onCancel}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------- Main app -------------------------
+function App() {
+  const apiHook = useApi();
+  const { token, setToken, request } = apiHook;
+  const [depts, setDepts] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [sel, setSel] = useState(null);         // {type:'dept'|'user', id}
+  const [expanded, setExpanded] = useState({});
+  const [dragOverId, setDragOverId] = useState(null);
+  const [rootOver, setRootOver] = useState(false);
+  const [creating, setCreating] = useState(null); // {kind:'dept'|'user', parentId?}
+  const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const flash = (msg, type = 'ok') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2600); };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [d, u] = await Promise.all([request('/api/admin/departments'), request('/api/admin/users')]);
+      setDepts(d.departments || []);
+      setUsers(u.users || []);
+    } catch (e) {
+      flash(e.message, 'err');
+      if (/401|403/.test(e.message)) setToken('');
+    } finally { setLoading(false); }
+  }, [request, setToken]);
+
+  useEffect(() => { if (token) load(); }, [token, load]);
+
+  const tree = useMemo(() => buildTree(depts), [depts]);
+  const usersByDept = useMemo(() => {
+    const m = {}; users.forEach(u => { const k = u.department_id || 0; (m[k] = m[k] || []).push(u); });
+    Object.values(m).forEach(arr => arr.sort((a, b) => a.full_name.localeCompare(b.full_name)));
+    return m;
+  }, [users]);
+
+  const selDept = sel && sel.type === 'dept' ? depts.find(d => d.id === sel.id) : null;
+  const selUser = sel && sel.type === 'user' ? users.find(u => u.id === sel.id) : null;
+
+  const toggle = (id) => setExpanded(e => ({ ...e, [id]: e[id] === false ? true : false }));
+
+  // ---- drag/drop handler ----
+  const onDrop = async (payload, targetDeptId) => {
+    try {
+      if (payload.type === 'user') {
+        await request(`/api/admin/users/${payload.id}/department`, { method: 'PATCH', body: JSON.stringify({ department_id: targetDeptId }) });
+        flash('Пользователь перемещён');
+      } else if (payload.type === 'dept') {
+        if (payload.id === targetDeptId) return;
+        await request(`/api/admin/departments/${payload.id}/parent`, { method: 'PATCH', body: JSON.stringify({ parent_id: targetDeptId }) });
+        flash('Подразделение перемещено');
+      }
+      await load();
+    } catch (e) { flash(e.message, 'err'); }
+  };
+  const onDropRoot = async (e) => {
+    e.preventDefault(); setRootOver(false);
+    let payload; try { payload = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
+    if (payload.type !== 'dept') { flash('Корнем может стать только подразделение', 'err'); return; }
+    try {
+      await request(`/api/admin/departments/${payload.id}/parent`, { method: 'PATCH', body: JSON.stringify({ parent_id: 0 }) });
+      flash('Сделано корневым'); await load();
+    } catch (e2) { flash(e2.message, 'err'); }
+  };
+
+  // ---- CRUD ----
+  const saveDept = async (id, f) => {
+    try { await request(`/api/admin/departments/${id}`, { method: 'PATCH', body: JSON.stringify(f) }); flash('Сохранено'); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const deleteDept = async (id) => {
+    if (!confirm('Удалить подразделение? Действие необратимо.')) return;
+    try { await request(`/api/admin/departments/${id}`, { method: 'DELETE' }); flash('Удалено'); setSel(null); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const createDept = async (f) => {
+    try { await request('/api/admin/departments', { method: 'POST', body: JSON.stringify(f) }); flash('Создано'); setCreating(null); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const saveUser = async (id, f) => {
+    try { await request(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(f) }); flash('Сохранено'); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const createUser = async (f) => {
+    try { await request('/api/admin/users', { method: 'POST', body: JSON.stringify(f) }); flash('Создано'); setCreating(null); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const setPassword = async (id, password) => {
+    try { await request(`/api/admin/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) }); flash('Пароль изменён'); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const setUserRoles = async (id, department_id, roles) => {
+    try { await request(`/api/admin/users/${id}/roles`, { method: 'PATCH', body: JSON.stringify({ department_id, roles }) }); flash('Роли сохранены'); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+  const setUserDepartments = async (id, sets) => {
+    try { await request(`/api/admin/users/${id}/departments`, { method: 'PATCH', body: JSON.stringify(sets) }); flash('Доп. подразделения сохранены'); await load(); }
+    catch (e) { flash(e.message, 'err'); }
+  };
+
+  if (!token) return <><Login apiHook={apiHook} /><Toast toast={toast} /></>;
+
+  return (
+    <div style={{ maxWidth: '120rem', margin: '0 auto', padding: 16 }}>
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20 }}>Администрирование СЭД</h1>
+          <div className="muted" style={{ fontSize: 12 }}>Оргструктура и пользователи · перетаскивайте узлы и людей мышью</div>
+        </div>
+        <div className="row">
+          <button className="btn ghost small" onClick={load}>{loading ? 'Обновление…' : '⟳ Обновить'}</button>
+          <button className="btn ghost small" onClick={() => setCreating({ kind: 'dept', parentId: 0 })}>+ Подразделение</button>
+          <button className="btn ghost small" onClick={() => setCreating({ kind: 'user' })}>+ Пользователь</button>
+          <button className="btn ghost small" onClick={() => { setToken(''); }}>Выйти</button>
+        </div>
+      </div>
+
+      <div className="split">
+        {/* Tree */}
+        <div className="card scroll" style={{ padding: 10, maxHeight: '78vh' }}>
+          <div
+            className={'muted' + (rootOver ? ' dz-over' : '')}
+            style={{ fontSize: 12, padding: '6px 8px', borderRadius: 8, marginBottom: 6, border: '1px dashed var(--border)' }}
+            onDragOver={e => { e.preventDefault(); setRootOver(true); }}
+            onDragLeave={() => setRootOver(false)}
+            onDrop={onDropRoot}
+          >
+            ⤒ Отпустите подразделение здесь, чтобы сделать его корневым
+          </div>
+          {tree.length === 0 && <div className="muted" style={{ padding: 12 }}>Нет подразделений. Создайте первое.</div>}
+          {tree.map(n => (
+            <DeptNode key={n.id} node={n} depth={0} usersByDept={usersByDept}
+              sel={sel} onSelect={(s) => { setSel(s); setCreating(null); }} onDrop={onDrop}
+              expanded={expanded} toggle={toggle} dragOverId={dragOverId} setDragOverId={setDragOverId} />
+          ))}
+          {/* unassigned users */}
+          {(usersByDept[0] || []).length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div className="muted" style={{ fontSize: 12, padding: '4px 8px' }}>Без подразделения:</div>
+              {(usersByDept[0] || []).map(u => <UserRow key={u.id} user={u} depth={0} sel={sel} onSelect={(s) => { setSel(s); setCreating(null); }} />)}
+            </div>
+          )}
+        </div>
+
+        {/* Editor / create */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {creating && creating.kind === 'dept' && (
+            <CreateDeptForm parentId={creating.parentId} depts={depts} onCreate={createDept} onCancel={() => setCreating(null)} />
+          )}
+          {creating && creating.kind === 'user' && (
+            <CreateUserForm depts={depts} onCreate={createUser} onCancel={() => setCreating(null)} />
+          )}
+          {!creating && selDept && (
+            <DeptEditor dept={selDept} onSave={saveDept} onDelete={deleteDept}
+              onCreateChild={(pid) => setCreating({ kind: 'dept', parentId: pid })} />
+          )}
+          {!creating && selUser && (
+            <UserEditor user={selUser} depts={depts} onSave={saveUser} onMove={onDrop} onPassword={setPassword} onRoles={setUserRoles} onDepartments={setUserDepartments} />
+          )}
+          {!creating && !selDept && !selUser && (
+            <div className="card muted" style={{ padding: 16 }}>
+              Выберите подразделение или пользователя слева, либо создайте новый элемент.
+              <ul style={{ marginTop: 10, paddingLeft: 18 }}>
+                <li>Перетащите <b>пользователя</b> на подразделение — переместить в него.</li>
+                <li>Перетащите <b>подразделение</b> на другое — сделать вложенным (с поддеревом).</li>
+                <li>Перетащите подразделение в зону сверху — сделать корневым.</li>
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+      <Toast toast={toast} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
